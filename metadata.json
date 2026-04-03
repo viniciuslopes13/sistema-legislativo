@@ -1,0 +1,5 @@
+{
+  "name": "SGLM - Sistema de Gestão Legislativa Municipal",
+  "description": "Sistema modular para automação de sessões plenárias e votação eletrônica, com painel em tempo real e controle de rito legislativo.",
+  "requestFramePermissions": []
+}
