@@ -1,257 +1,280 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
-import { Sessao, ConfiguracaoFase, ItemPauta, Votacao, Voto, Presenca, Parlamentar, Camara, Usuario } from '../types';
 
-// Mock data for initial state (fallback)
-const MOCK_FASES: ConfiguracaoFase[] = [
-  { id: 'f1', template_id: 't1', nome_fase: 'Pequeno Expediente', ordem: 0, tempo_cronometro: 900, permite_votacao: false, exige_quorum_minimo: true, percentual_quorum: 0.33 },
-  { id: 'f2', template_id: 't1', nome_fase: 'Ordem do Dia', ordem: 1, tempo_cronometro: 3600, permite_votacao: true, exige_quorum_minimo: true, percentual_quorum: 0.5 },
-  { id: 'f3', template_id: 't1', nome_fase: 'Discussão em Destaque', ordem: 2, tempo_cronometro: 600, permite_votacao: true, exige_quorum_minimo: true, percentual_quorum: 0.5 },
-];
+// Importação dos DTOs (Data Transfer Objects)
+import { SessaoDTO, ConfiguracaoFaseDTO, PresencaDTO } from '../dtos/sessao.dto';
+import { VotacaoDTO, VotoDTO, ItemPautaDTO } from '../dtos/votacao.dto';
+import { ParlamentarDTO } from '../dtos/usuario.dto';
+import { CamaraDTO } from '../dtos/camara.dto';
 
-export function useSGLMRealtime(overrideCamaraId?: string) {
+// Importação dos modelos orientados a objetos
+import { Sessao } from '../models/Sessao.model';
+import { Votacao } from '../models/Votacao.model';
+import { Usuario } from '../models/Usuario.model';
+
+// Importação dos serviços
+import { autenticacaoService } from '../services/autenticacao.service';
+import { usuarioService } from '../services/usuario.service';
+import { sessaoService } from '../services/sessao.service';
+import { votacaoService } from '../services/votacao.service';
+import { camaraService } from '../services/camara.service';
+
+/**
+ * Hook central que gerencia o estado da aplicação em tempo real.
+ */
+export function useSGLMRealtime(idCamaraOverride?: string) {
+  // Estados de Dados
   const [sessao, setSessao] = useState<Sessao | null>(null);
-  const [fases] = useState<ConfiguracaoFase[]>(MOCK_FASES);
-  const [itens, setItens] = useState<ItemPauta[]>([]);
+  const [sessoesAgendadas, setSessoesAgendadas] = useState<Sessao[]>([]);
+  const [fases, setFases] = useState<ConfiguracaoFaseDTO[]>([]);
+  const [itens, setItens] = useState<ItemPautaDTO[]>([]);
   const [votacaoAtiva, setVotacaoAtiva] = useState<Votacao | null>(null);
-  const [votos, setVotos] = useState<Voto[]>([]);
-  const [presencas, setPresencas] = useState<Presenca[]>([]);
-  const [parlamentares, setParlamentares] = useState<Parlamentar[]>([]);
-  const [camaras, setCamaras] = useState<Camara[]>([]);
-  const [currentUser, setCurrentUser] = useState<Parlamentar | null>(null);
-  const [isAuthReady, setIsAuthReady] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(3600);
+  const [votos, setVotos] = useState<VotoDTO[]>([]);
+  const [presencas, setPresencas] = useState<PresencaDTO[]>([]);
+  const [parlamentares, setParlamentares] = useState<Usuario[]>([]);
+  const [camaras, setCamaras] = useState<CamaraDTO[]>([]);
+  const [templates, setTemplates] = useState<any[]>([]);
+  
+  // Estados de Sessão do Usuário
+  const [usuarioAtual, setUsuarioAtual] = useState<Usuario | null>(null);
+  const [autenticacaoPronta, setAutenticacaoPronta] = useState(false);
+  const [tempoRestante, setTempoRestante] = useState(0);
+  
+  const refIdUsuarioAtual = useRef<string | null>(null);
 
-  // User Management Functions
-  const createUser = async (data: Partial<Parlamentar>) => {
-    if (!currentUser || (currentUser.perfil !== 'ADMIN' && currentUser.perfil !== 'PRESIDENTE' && currentUser.perfil !== 'SECRETARIO')) {
-      throw new Error('Permissão negada');
-    }
+  // --- Fetchers ---
 
-    const camaraId = currentUser.perfil === 'ADMIN' ? data.camaraId : currentUser.camaraId;
-    if (!camaraId) throw new Error('Câmara não especificada');
-
-    // In Supabase, we would typically use an edge function or a service role to create users
-    // For this demo, we'll just insert into the profiles table
-    const { error: userError } = await supabase.from('usuarios').insert({
-      nome: data.nome,
-      email: data.email,
-      perfil: data.perfil,
-      camara_id: camaraId,
-      ativo: true
-    });
-
-    if (userError) throw userError;
-  };
-
-  const deleteUser = async (id: string) => {
-    if (!currentUser || currentUser.perfil !== 'ADMIN') throw new Error('Permissão negada');
-    const { error } = await supabase.from('usuarios').delete().eq('id', id);
-    if (error) throw error;
-  };
-
-  // Camara Management Functions
-  const createCamara = async (data: Partial<Camara>) => {
-    if (!currentUser || currentUser.perfil !== 'ADMIN') throw new Error('Permissão negada');
-    const { error } = await supabase.from('camaras').insert({
-      nome: data.nome,
-      cidade: data.cidade,
-      estado: data.estado,
-      ativo: true
-    });
-    if (error) throw error;
-  };
-
-  const deleteCamara = async (id: string) => {
-    if (!currentUser || currentUser.perfil !== 'ADMIN') throw new Error('Permissão negada');
-    const { error } = await supabase.from('camaras').delete().eq('id', id);
-    if (error) throw error;
-  };
-
-  // Auth Listener
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        const { data: profile } = await supabase
-          .from('usuarios')
-          .select('*, parlamentares(*)')
-          .eq('id', session.user.id)
-          .single();
-
-        if (profile) {
-          const parlamentarData: Parlamentar = {
-            id: profile.id,
-            nome: profile.nome,
-            email: profile.email,
-            perfil: profile.perfil,
-            camaraId: profile.camara_id,
-            ativo: profile.ativo,
-            partido: profile.parlamentares?.partido || 'SGLM',
-            cargo_mesa: profile.parlamentares?.cargo_mesa,
-            foto_url: profile.parlamentares?.foto_url,
-            is_suplente: profile.parlamentares?.is_suplente || false,
-            em_exercicio: profile.parlamentares?.em_exercicio || true
-          };
-          setCurrentUser(parlamentarData);
-        } else if (session.user.email === "franciscoviniciuslopescosta@gmail.com") {
-          // Super Admin fallback
-          const adminData: Parlamentar = {
-            id: session.user.id,
-            nome: session.user.user_metadata.full_name || 'Super Admin',
-            email: session.user.email || '',
-            perfil: 'ADMIN',
-            partido: 'SGLM',
-            ativo: true,
-            em_exercicio: true,
-            is_suplente: false,
-            foto_url: session.user.user_metadata.avatar_url || ''
-          };
-          setCurrentUser(adminData);
-        } else {
-          setCurrentUser(null);
-        }
-      } else {
-        setCurrentUser(null);
-      }
-      setIsAuthReady(true);
-    });
-
-    return () => subscription.unsubscribe();
+  const buscarCamaras = useCallback(async () => {
+    const dados = await camaraService.listarCamaras();
+    setCamaras(dados);
   }, []);
 
-  // Realtime listeners
-  useEffect(() => {
-    if (!isAuthReady) return;
+  const buscarTemplates = useCallback(async () => {
+    const idCamara = idCamaraOverride || usuarioAtual?.camara_id;
+    if (!idCamara) return;
+    const dados = await camaraService.buscarTemplates(idCamara);
+    setTemplates(dados);
+  }, [usuarioAtual?.camara_id, idCamaraOverride]);
 
-    const effectiveCamaraId = overrideCamaraId || currentUser?.camaraId;
+  const buscarParlamentares = useCallback(async () => {
+    const idCamara = idCamaraOverride || usuarioAtual?.camara_id;
+    if (!idCamara && !usuarioAtual?.eAdminGlobal()) return;
+    
+    try {
+      const dtos = await usuarioService.listarParlamentares(idCamara);
+      setParlamentares(dtos.map(dto => Usuario.deDTO(dto)));
+    } catch (e) {
+      console.error("Erro ao buscar parlamentares:", e);
+    }
+  }, [usuarioAtual, idCamaraOverride]);
 
-    // 1. Camaras Subscription
-    const fetchCamaras = async () => {
-      let query = supabase.from('camaras').select('*').eq('ativo', true);
-      if (currentUser?.perfil !== 'ADMIN' || overrideCamaraId) {
-        if (effectiveCamaraId) query = query.eq('id', effectiveCamaraId);
-      }
-      const { data } = await query.order('nome');
-      if (data) setCamaras(data.map(c => ({ ...c, camaraId: c.id })));
-    };
+  const buscarDadosSessao = useCallback(async () => {
+    const idCamara = idCamaraOverride || usuarioAtual?.camara_id;
+    if (!idCamara) return;
+    
+    try {
+      const sessaoDto = await sessaoService.buscarSessaoAtiva(idCamara);
 
-    fetchCamaras();
-    const camarasChannel = supabase.channel('camaras_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'camaras' }, fetchCamaras)
-      .subscribe();
+      if (sessaoDto) {
+        setSessao(Sessao.deDTO(sessaoDto));
+        if (sessaoDto.template_id) {
+          const dadosFases = await sessaoService.buscarFases(sessaoDto.template_id);
+          setFases(dadosFases);
+        }
+        const dadosItens = await sessaoService.buscarItensPauta(sessaoDto.id);
+        setItens(dadosItens);
 
-    // 2. Sessoes Subscription
-    const fetchSessoes = async () => {
-      if (!effectiveCamaraId && currentUser?.perfil !== 'ADMIN') return;
-      let query = supabase.from('sessoes').select('*').eq('status', 'EM_CURSO');
-      if (effectiveCamaraId) query = query.eq('camara_id', effectiveCamaraId);
-      
-      const { data } = await query.order('data_inicio', { ascending: false }).limit(1);
-      if (data && data.length > 0) {
-        const s = data[0];
-        setSessao({
-          id: s.id,
-          camaraId: s.camara_id,
-          template_id: s.template_id,
-          data_inicio: s.data_inicio,
-          status: s.status,
-          fase_indice_atual: s.fase_indice_atual
-        });
-        fetchItens(s.id);
-        fetchVotos(s.id);
+        const votacaoDto = await votacaoService.buscarVotacaoAtiva();
+        if (votacaoDto) {
+          setVotacaoAtiva(Votacao.deDTO(votacaoDto));
+          const dadosVotos = await votacaoService.buscarVotos(votacaoDto.id);
+          setVotos(dadosVotos);
+        } else {
+          setVotacaoAtiva(null);
+          setVotos([]);
+        }
+        const dadosPresencas = await sessaoService.buscarPresencas(sessaoDto.id);
+        setPresencas(dadosPresencas);
       } else {
         setSessao(null);
+        setFases([]);
         setItens([]);
+        setVotacaoAtiva(null);
         setVotos([]);
       }
-    };
 
-    const fetchItens = async (sessaoId: string) => {
-      const { data } = await supabase.from('itens_pauta').select('*').eq('sessao_id', sessaoId).order('ordem');
-      if (data) setItens(data);
-    };
+      const agendadasDto = await sessaoService.listarSessoesAgendadas(idCamara);
+      setSessoesAgendadas(Sessao.listaDeDTO(agendadasDto));
+    } catch (e) {
+      console.error("Erro ao buscar dados da sessão:", e);
+    }
+  }, [usuarioAtual?.camara_id, idCamaraOverride]);
 
-    const fetchVotos = async (sessaoId: string) => {
-      const { data } = await supabase.from('votos').select('*').order('timestamp', { ascending: false });
-      if (data) setVotos(data);
-    };
+  const buscarPerfil = useCallback(async (idUsuario: string) => {
+    try {
+      const dto = await usuarioService.buscarPerfilPorId(idUsuario);
+      if (dto) setUsuarioAtual(Usuario.deDTO(dto));
+    } catch (err) {
+      console.error("Erro crítico ao carregar perfil:", err);
+    } finally {
+      setAutenticacaoPronta(true);
+    }
+  }, []);
 
-    fetchSessoes();
-    const sessoesChannel = supabase.channel('sessoes_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sessoes' }, fetchSessoes)
-      .subscribe();
-
-    // 3. Parlamentares Subscription
-    const fetchParlamentares = async () => {
-      if (!effectiveCamaraId && currentUser?.perfil !== 'ADMIN') return;
-      let query = supabase.from('usuarios').select('*, parlamentares(*)');
-      if (effectiveCamaraId) query = query.eq('camara_id', effectiveCamaraId);
-      
-      const { data } = await query;
-      if (data) {
-        setParlamentares(data.map(p => ({
-          id: p.id,
-          nome: p.nome,
-          email: p.email,
-          perfil: p.perfil,
-          camaraId: p.camara_id,
-          ativo: p.ativo,
-          partido: p.parlamentares?.partido || 'SGLM',
-          cargo_mesa: p.parlamentares?.cargo_mesa,
-          foto_url: p.parlamentares?.foto_url,
-          is_suplente: p.parlamentares?.is_suplente || false,
-          em_exercicio: p.parlamentares?.em_exercicio || true
-        })));
-      }
-    };
-
-    fetchParlamentares();
-    const parlamentaresChannel = supabase.channel('parlamentares_changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'usuarios' }, fetchParlamentares)
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(camarasChannel);
-      supabase.removeChannel(sessoesChannel);
-      supabase.removeChannel(parlamentaresChannel);
-    };
-  }, [isAuthReady, currentUser?.camaraId, overrideCamaraId]);
-
-  // Timer logic
+  // --- Realtime Engine ---
   useEffect(() => {
-    if (!sessao) return;
-    const interval = setInterval(() => {
-      setTimeLeft(prev => prev > 0 ? prev - 1 : 0);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [sessao]);
+    autenticacaoService.obterSessaoAtual().then(session => {
+      if (session?.user) {
+        refIdUsuarioAtual.current = session.user.id;
+        buscarPerfil(session.user.id);
+      } else {
+        setAutenticacaoPronta(true);
+      }
+    });
 
-  return {
-    sessao,
-    fases,
-    itens,
-    votacaoAtiva,
-    votos,
-    presencas,
-    parlamentares,
-    camaras,
-    currentUser,
-    isAuthReady,
-    timeLeft,
-    createUser,
-    deleteUser,
-    createCamara,
-    deleteCamara,
-    openVoting: async (itemId: string) => {
-      console.log('Opening voting for item:', itemId);
-      setVotacaoAtiva({ id: 'v1', status: 'VOTANDO', tipo_quorum: 'MAIORIA_SIMPLES' });
-    },
-    closeVoting: async () => {
-      setVotacaoAtiva(null);
-    },
-    castVote: async (opcao: 'SIM' | 'NAO' | 'ABSTER') => {
-      if (!currentUser) return;
-      console.log('Casting vote:', opcao);
+    const sub = autenticacaoService.onEstadoAutenticacaoAlterado((_event, session) => {
+      if (session?.user) {
+        refIdUsuarioAtual.current = session.user.id;
+        buscarPerfil(session.user.id);
+      } else {
+        refIdUsuarioAtual.current = null;
+        setUsuarioAtual(null);
+        setAutenticacaoPronta(true);
+      }
+    });
+    return () => sub.unsubscribe();
+  }, [buscarPerfil]);
+
+  useEffect(() => {
+    if (!autenticacaoPronta) return;
+    const idCamara = idCamaraOverride || usuarioAtual?.camara_id;
+
+    buscarCamaras();
+    buscarTemplates();
+    buscarDadosSessao();
+    buscarParlamentares();
+
+    const canal = supabase.channel(`sessao_${idCamara || 'global'}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sessoes' }, buscarDadosSessao)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'votacoes' }, buscarDadosSessao)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'votos' }, buscarDadosSessao)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'presencas' }, buscarDadosSessao)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'usuarios' }, () => {
+        buscarParlamentares();
+        if (refIdUsuarioAtual.current) buscarPerfil(refIdUsuarioAtual.current);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'parlamentares' }, buscarParlamentares)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'usuario_perfis' }, buscarParlamentares)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'camaras' }, buscarCamaras)
+      .subscribe();
+
+    return () => { supabase.removeChannel(canal); };
+  }, [autenticacaoPronta, usuarioAtual?.camara_id, idCamaraOverride, buscarPerfil, buscarCamaras, buscarParlamentares, buscarDadosSessao, buscarTemplates]);
+
+  // --- Actions ---
+
+  const avancarFase = async () => {
+    if (!sessao || !usuarioAtual?.temPermissao('SESSAO_AVANCAR')) return;
+    const proximoIndice = sessao.fase_indice_atual + 1;
+    if (proximoIndice >= fases.length) return;
+    await sessaoService.avancarFase(sessao.id, proximoIndice);
+  };
+
+  const iniciarVotacao = async (idItem: string) => {
+    if (!sessao || !usuarioAtual?.temPermissao('VOTACAO_INICIAR')) return;
+    const faseAtual = fases[sessao.fase_indice_atual];
+    if (!faseAtual?.permite_votacao) return alert('A fase atual não permite votação.');
+    const novaVotacaoDto = await votacaoService.abrirVotacao(idItem);
+    if (novaVotacaoDto) setVotacaoAtiva(Votacao.deDTO(novaVotacaoDto));
+  };
+
+  const registrarVoto = async (opcao: 'SIM' | 'NAO' | 'ABSTER') => {
+    if (!usuarioAtual || !votacaoAtiva || !usuarioAtual.temPermissao('VOTAR')) return;
+    await votacaoService.registrarVoto(votacaoAtiva.id, usuarioAtual.id, opcao);
+  };
+
+  const registrarPresenca = async () => {
+    if (!usuarioAtual || !sessao) return;
+    await sessaoService.registrarPresenca(sessao.id, usuarioAtual.id);
+  };
+
+  const criarSessao = async (dados: any) => {
+    if (!usuarioAtual?.temPermissao('SESSAO_CRIAR') && !usuarioAtual?.eAdminGlobal()) throw new Error('Sem permissão.');
+    const idCamara = usuarioAtual?.eAdminGlobal() ? dados.camara_id : usuarioAtual?.camara_id;
+    const { error } = await sessaoService.criarSessao({ camara_id: idCamara, template_id: dados.template_id, data_inicio: dados.data_inicio });
+    if (error) throw error;
+    buscarDadosSessao();
+  };
+
+  const abrirSessao = async (id: string) => {
+    if (!usuarioAtual?.ePresidente() && !usuarioAtual?.eAdminGlobal()) throw new Error('Apenas o Presidente pode abrir.');
+    const { error } = await sessaoService.abrirSessao(id);
+    if (error) throw error;
+    buscarDadosSessao();
+  };
+
+  const encerrarSessao = async (id: string) => {
+    const { error } = await sessaoService.finalizarSessao(id);
+    if (error) throw error;
+    buscarDadosSessao();
+  };
+
+  const criarCamara = async (dados: Partial<CamaraDTO>) => {
+    if (!usuarioAtual?.eAdminGlobal()) throw new Error('Sem permissão.');
+    const { error } = await camaraService.criarCamara(dados);
+    if (error) throw error;
+    buscarCamaras();
+  };
+
+  const criarUsuario = async (dados: any, perfilTipo: string) => {
+    const idCamara = usuarioAtual?.eAdminGlobal() ? dados.camara_id : usuarioAtual?.camara_id;
+    const resultado = await usuarioService.criarUsuario(dados, perfilTipo, idCamara);
+    buscarParlamentares();
+    return resultado;
+  };
+
+  const atualizarCamara = async (id: string, dados: Partial<CamaraDTO>) => {
+    await camaraService.atualizarCamara(id, dados);
+    buscarCamaras();
+  };
+
+  const atualizarUsuario = async (id: string, dados: any) => {
+    await usuarioService.atualizarUsuario(id, dados);
+    buscarParlamentares();
+  };
+
+  const resetarSenhaUsuario = async (id: string) => {
+    const novaSenha = await usuarioService.resetarSenha(id);
+    buscarParlamentares();
+    return novaSenha;
+  };
+
+  const sair = async () => {
+    try {
+      // 1. Limpa os estados locais IMEDIATAMENTE para travar a interface
+      setUsuarioAtual(null);
+      setSessao(null);
+      refIdUsuarioAtual.current = null;
+      
+      // 2. Chama o logout do Supabase para limpar cookies/localStorage
+      await autenticacaoService.logout();
+      
+      // 3. Força o estado de autenticação como pronta para os guards agirem
+      setAutenticacaoPronta(true);
+    } catch (e) {
+      console.error("Erro ao sair:", e);
+      // Em caso de erro, forçamos a limpeza local de qualquer forma
+      setUsuarioAtual(null);
+      window.location.href = '/login'; 
     }
   };
-}
+
+  return {
+    sessao, sessoesAgendadas, fases, itens, votacaoAtiva, votos, presencas, parlamentares, camaras, templates, usuarioAtual, autenticacaoPronta, tempoRestante,
+    faseAtual: fases[sessao?.fase_indice_atual || 0] || null,
+    quorum: { presentes: presencas.length, total: parlamentares.length || 15 },
+    avancarFase, iniciarVotacao, registrarVoto, registrarPresenca, criarCamara, criarUsuario, atualizarCamara, atualizarUsuario, criarSessao, abrirSessao, encerrarSessao, resetarSenhaUsuario,
+    resultadoVotacao: votacaoAtiva?.calcularResultado(votos, parlamentares.length) || null,
+    sair
+  };
+  }

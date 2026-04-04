@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Monitor, ShieldCheck, Globe, ChevronRight, FileText, Users, Clock } from 'lucide-react';
 import { motion } from 'motion/react';
 
-export default function LandingPage() {
+export const LandingPage = () => {
   const navigate = useNavigate();
 
   return (

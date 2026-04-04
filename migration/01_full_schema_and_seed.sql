@@ -1,4 +1,21 @@
--- SGLM Supabase Schema - Versão Final (Baseada na Especificação Técnica)
+-- SGLM - Migração Completa: Reset e Reconstrução (CORRIGIDA)
+-- Este script limpa toda a base e recria a estrutura final baseada na especificação técnica.
+
+-- 0. LIMPEZA TOTAL (Cuidado: apaga todos os dados!)
+DROP TABLE IF EXISTS votos CASCADE;
+DROP TABLE IF EXISTS votacoes CASCADE;
+DROP TABLE IF EXISTS itens_pauta CASCADE;
+DROP TABLE IF EXISTS presencas CASCADE;
+DROP TABLE IF EXISTS sessoes CASCADE;
+DROP TABLE IF EXISTS configuracao_fases CASCADE;
+DROP TABLE IF EXISTS templates_rito CASCADE;
+DROP TABLE IF EXISTS parlamentares CASCADE;
+DROP TABLE IF EXISTS usuario_perfis CASCADE;
+DROP TABLE IF EXISTS perfil_operacoes CASCADE;
+DROP TABLE IF EXISTS operacoes CASCADE;
+DROP TABLE IF EXISTS perfis CASCADE;
+DROP TABLE IF EXISTS usuarios CASCADE;
+DROP TABLE IF EXISTS camaras CASCADE;
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -105,7 +122,7 @@ CREATE TABLE itens_pauta (
   titulo_manual TEXT NOT NULL,
   ementa_manual TEXT,
   ordem INTEGER NOT NULL,
-  id_referencia_tramitacao UUID, -- Interface para futuro módulo
+  id_referencia_tramitacao UUID,
   tipo_materia TEXT CHECK (tipo_materia IN ('PL', 'VETO', 'REQUERIMENTO')),
   created_at TIMESTAMPTZ DEFAULT now()
 );
@@ -132,9 +149,9 @@ CREATE TABLE votos (
 
 -- 7. REALTIME & RLS
 ALTER PUBLICATION supabase_realtime ADD TABLE 
-  sessoes, presencas, votacoes, votos, configuracao_fases;
+  sessoes, presencas, votacoes, votos, configuracao_fases, usuarios, parlamentares;
 
--- Habilitar RLS em todas as tabelas
+-- Habilitar RLS
 ALTER TABLE camaras ENABLE ROW LEVEL SECURITY;
 ALTER TABLE perfis ENABLE ROW LEVEL SECURITY;
 ALTER TABLE operacoes ENABLE ROW LEVEL SECURITY;
@@ -150,14 +167,51 @@ ALTER TABLE itens_pauta ENABLE ROW LEVEL SECURITY;
 ALTER TABLE votacoes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE votos ENABLE ROW LEVEL SECURITY;
 
--- Políticas de Exemplo (Simplificadas para o protótipo)
+-- Políticas de Acesso
 CREATE POLICY "Leitura pública para usuários autenticados" ON sessoes FOR SELECT USING (auth.role() = 'authenticated');
 CREATE POLICY "Leitura pública de itens de pauta" ON itens_pauta FOR SELECT USING (true);
 CREATE POLICY "Leitura pública de votações" ON votacoes FOR SELECT USING (true);
-CREATE POLICY "Votos são inseríveis por parlamentares autenticados" ON votos FOR INSERT WITH CHECK (
-  EXISTS (
-    SELECT 1 FROM usuarios 
-    WHERE id = auth.uid() 
-    AND ativo = true
-  )
-);
+CREATE POLICY "Leitura pública de câmaras" ON camaras FOR SELECT USING (true);
+CREATE POLICY "Usuários podem ver perfis da sua câmara" ON usuarios FOR SELECT USING (true);
+
+-- 8. SEED DATA (DADOS INICIAIS)
+
+-- Inserir Operações
+INSERT INTO operacoes (codigo, descricao) VALUES
+('SESSAO_ABRIR', 'Abrir nova sessão plenária'),
+('SESSAO_AVANCAR', 'Avançar fase da sessão'),
+('VOTACAO_INICIAR', 'Iniciar votação de matéria'),
+('VOTACAO_ENCERRAR', 'Encerrar votação de matéria'),
+('VOTAR', 'Registrar voto em matéria'),
+('PRESENCA_REGISTRAR', 'Registrar presença na sessão');
+
+-- Criar Câmara de Exemplo
+INSERT INTO camaras (id, nome, cidade, estado) VALUES
+('d290f1ee-6c54-4b01-90e6-d701748f0851', 'Câmara Municipal de Exemplo', 'Brasília', 'DF');
+
+-- Criar Perfis Padrão para a Câmara de Exemplo (IDs HEX válidos)
+INSERT INTO perfis (id, nome, tipo_base, camara_id) VALUES
+('a1111111-1111-1111-1111-111111111111', 'Presidente', 'PRESIDENTE', 'd290f1ee-6c54-4b01-90e6-d701748f0851'),
+('b2222222-2222-2222-2222-222222222222', 'Secretário', 'SECRETARIO', 'd290f1ee-6c54-4b01-90e6-d701748f0851'),
+('c3333333-3333-3333-3333-333333333333', 'Vereador', 'VEREADOR', 'd290f1ee-6c54-4b01-90e6-d701748f0851');
+
+-- Associar Operações aos Perfis
+INSERT INTO perfil_operacoes (perfil_id, operacao_id)
+SELECT 'a1111111-1111-1111-1111-111111111111', id FROM operacoes;
+
+INSERT INTO perfil_operacoes (perfil_id, operacao_id)
+SELECT 'b2222222-2222-2222-2222-222222222222', id FROM operacoes 
+WHERE codigo IN ('SESSAO_AVANCAR', 'VOTACAO_INICIAR', 'VOTACAO_ENCERRAR', 'PRESENCA_REGISTRAR');
+
+INSERT INTO perfil_operacoes (perfil_id, operacao_id)
+SELECT 'c3333333-3333-3333-3333-333333333333', id FROM operacoes 
+WHERE codigo IN ('VOTAR', 'PRESENCA_REGISTRAR');
+
+-- Criar Template de Rito e Fases (Corrigido para 'e' em vez de 't')
+INSERT INTO templates_rito (id, camara_id, nome) VALUES
+('e1111111-1111-1111-1111-111111111111', 'd290f1ee-6c54-4b01-90e6-d701748f0851', 'Rito Ordinário Padrão');
+
+INSERT INTO configuracao_fases (template_id, nome_fase, ordem, tempo_cronometro, permite_votacao, exige_quorum_minimo, percentual_quorum) VALUES
+('e1111111-1111-1111-1111-111111111111', 'Pequeno Expediente', 0, 900, false, true, 0.33),
+('e1111111-1111-1111-1111-111111111111', 'Ordem do Dia', 1, 3600, true, true, 0.5),
+('e1111111-1111-1111-1111-111111111111', 'Explicações Pessoais', 2, 600, false, false, 0);

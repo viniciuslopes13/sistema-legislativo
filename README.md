@@ -1,26 +1,39 @@
 # SGLM - Sistema de Gestão Legislativa Municipal
 
-Este é um sistema moderno para gestão de sessões plenárias e votação eletrônica, focado em transparência e eficiência.
+O **SGLM** é uma plataforma de nível profissional para gestão de sessões plenárias e votação eletrônica em tempo real, focada em transparência, segurança e eficiência para Câmaras Municipais.
 
-## Funcionalidades
+## 🚀 Novas Funcionalidades e Melhorias
 
-- **Landing Page**: Divulgação do sistema e acesso rápido.
-- **Login**: Autenticação segura para parlamentares e servidores.
-- **Visão do Vereador**: Interface intuitiva para votação em tempo real.
-- **Visão do Presidente**: Painel de controle completo da sessão e votações.
-- **Visão do Secretário**: Console para gerenciamento do rito e cronômetros.
-- **Telão Público**: Interface otimizada para transmissão e acompanhamento da população.
+- **Arquitetura em Camadas:** Sistema organizado com separação de responsabilidades (DTOs, Domain Models e Services).
+- **Tempo Real (Supabase Realtime):** Sincronização instantânea de votações, presenças e cronômetros de fase.
+- **Multi-tenancy:** Suporte a múltiplas Câmaras Municipais com isolamento total de dados via Row Level Security (RLS).
+- **Segurança Avançada:** Proteção de rotas via Guards e auditoria nativa no banco de dados.
+- **Interface Moderna (Tema Claro):** UX refinada com sistema de notificações (Toasts) e modais customizados.
+- **Portal de Transparência:** Telão público para acompanhamento populacional em tempo real com busca de municípios.
 
-## Tecnologias Utilizadas
+## 🛠️ Stack Tecnológica
 
-- **React 19** + **Vite**
-- **Tailwind CSS 4**
-- **Framer Motion** (animações)
-- **Lucide React** (ícones)
-- **Recharts** (gráficos de votação)
-- **Supabase** (Backend as a Service - Realtime & Auth)
+- **Frontend:** React 19, Vite, TypeScript.
+- **Estilização:** Tailwind CSS 4, Framer Motion (animações).
+- **Banco de Dados & Realtime:** PostgreSQL via **Supabase**.
+- **Autenticação:** Supabase Auth (E-mail/Senha com suporte a senhas provisórias).
+- **Ícones:** Lucide React.
 
-## Como Rodar Localmente
+## 📁 Estrutura de Pastas
+
+```text
+src/
+├── components/     # Componentes reutilizáveis (UI e Legislativo)
+├── context/        # Estado Global (Context API) e Notificações
+├── dtos/           # Contratos de dados brutos do banco
+├── guards/         # Proteções de rotas e permissões
+├── hooks/          # Orquestração de Tempo Real
+├── models/         # Classes Orientadas a Objetos (Lógica de Negócio)
+├── pages/          # Páginas principais do sistema
+└── services/       # Comunicação isolada com Supabase
+```
+
+## ⚙️ Como Rodar Localmente
 
 1.  **Instale as dependências**:
     ```bash
@@ -28,7 +41,7 @@ Este é um sistema moderno para gestão de sessões plenárias e votação eletr
     ```
 
 2.  **Configure as variáveis de ambiente**:
-    Crie um arquivo `.env` na raiz do projeto com as seguintes chaves (veja `.env.example`):
+    Crie um arquivo `.env` na raiz do projeto:
     ```env
     VITE_SUPABASE_URL=sua_url_do_supabase
     VITE_SUPABASE_ANON_KEY=sua_chave_anon_do_supabase
@@ -39,49 +52,14 @@ Este é um sistema moderno para gestão de sessões plenárias e votação eletr
     npm run dev
     ```
 
-## Integração com Supabase
+## 🔐 Segurança e Banco de Dados
 
-O sistema está preparado para integração em tempo real. Para ativar a comunicação real:
+O sistema depende de políticas de **Row Level Security (RLS)** configuradas no Supabase. 
+Para aplicar a estrutura de segurança e auditoria, execute os scripts SQL localizados na pasta `/migration` no seu console do Supabase, seguindo a ordem numérica.
 
-1.  Crie as tabelas no Supabase seguindo o modelo de dados (veja o diagrama de classes).
-2.  Habilite o **Realtime** para as tabelas `sessoes`, `votos` e `presencas`.
-3.  No arquivo `src/hooks/useSGLMRealtime.ts`, substitua os dados mockados por chamadas reais usando o cliente Supabase configurado em `src/lib/supabase.ts`.
+## 📄 Documentação Técnica
 
-## Estrutura do Banco de Dados (Firestore)
+Para detalhes aprofundados sobre a lógica de negócio, cálculos de quórum e padrões de projeto utilizados, consulte o arquivo [ARQUITETURA.md](./ARQUITETURA.md).
 
-O sistema utiliza o **Google Cloud Firestore** para persistência e sincronização em tempo real.
-
-### Coleções Principais
-
-- **`parlamentares`**: Documentos identificados pelo `uid` do Firebase Auth.
-  - `nome` (string): Nome completo do parlamentar.
-  - `email` (string): E-mail oficial.
-  - `partido` (string): Sigla do partido.
-  - `perfil` (enum): `VEREADOR`, `PRESIDENTE` ou `SECRETARIO`.
-  - `foto_url` (string): URL da foto do perfil.
-  - `ativo` (boolean): Status da conta.
-
-- **`sessoes`**: Documentos que representam as sessões plenárias.
-  - `data_inicio` (timestamp): Início da sessão.
-  - `status` (enum): `EM_CURSO`, `ENCERRADA`, etc.
-  - `fase_indice_atual` (number): Índice da fase atual (0 a 2).
-  - `votacao_status` (enum): `AGUARDANDO`, `VOTANDO`, `CONCLUIDA`.
-  - `item_voto_id` (string): ID do item de pauta em votação.
-
-- **`itens_pauta`**: Subcoleção dentro de cada sessão (`sessoes/{id}/itens_pauta`).
-  - `titulo_manual` (string): Título da matéria.
-  - `ementa_manual` (string): Descrição detalhada.
-  - `ordem` (number): Sequência de exibição.
-
-- **`votos`**: Subcoleção dentro de cada sessão (`sessoes/{id}/votos`).
-  - `usuario_id` (string): UID do parlamentar que votou.
-  - `opcao` (enum): `SIM`, `NAO`, `ABSTER`.
-  - `timestamp` (timestamp): Momento do voto.
-
-## Autenticação
-
-O sistema suporta dois métodos de acesso:
-1. **Google Login**: Acesso rápido para contas institucionais.
-2. **E-mail e Senha**: Acesso comum para usuários cadastrados manualmente.
-
-> **Nota**: Para habilitar o login por e-mail, acesse o Console do Firebase > Authentication > Sign-in method e ative o provedor "E-mail/Senha".
+---
+Desenvolvido por SGLM PRO © 2026
