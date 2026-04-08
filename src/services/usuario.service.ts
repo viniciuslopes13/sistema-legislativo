@@ -47,14 +47,17 @@ export const usuarioService = {
       }
 
       const permissoes = new Set<string>();
+      const perfis_ids = new Set<string>();
       let bestTipoBase: any = 'VEREADOR';
       const prioridade: Record<string, number> = { 'ADMIN': 4, 'PRESIDENTE': 3, 'SECRETARIO': 2, 'VEREADOR': 1 };
       
       const uPerfis = userProfile.usuario_perfis;
       if (uPerfis && Array.isArray(uPerfis)) {
         uPerfis.forEach((up: any) => {
+          if (up.perfil_id) perfis_ids.add(up.perfil_id);
           const p = up.perfis;
           if (p) {
+            if (p.id) perfis_ids.add(p.id);
             if ((prioridade[p.tipo_base] || 0) > (prioridade[bestTipoBase] || 0)) bestTipoBase = p.tipo_base;
             p.perfil_operacoes?.forEach((po: any) => {
               if (po.operacoes?.codigo) permissoes.add(po.operacoes.codigo);
@@ -73,6 +76,7 @@ export const usuarioService = {
         is_suplente: userProfile.parlamentares?.is_suplente || false,
         em_exercicio: userProfile.parlamentares?.em_exercicio || true,
         perfil: bestTipoBase,
+        perfis_ids: Array.from(perfis_ids),
         permissoes: Array.from(permissoes)
       };
     } catch (err) {
@@ -82,10 +86,19 @@ export const usuarioService = {
   },
 
   async listarParlamentares(camaraId?: string): Promise<ParlamentarDTO[]> {
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session) {
+      if (!camaraId) return [];
+      const { data } = await supabase.rpc('obter_parlamentares_publicos', { p_camara_id: camaraId });
+      return data || [];
+    }
+
     let query = supabase.from('usuarios').select(`
       *,
       parlamentares(*),
       usuario_perfis(
+        perfil_id,
         perfis(tipo_base)
       )
     `);
@@ -109,12 +122,13 @@ export const usuarioService = {
         foto_url: p.parlamentares?.foto_url,
         is_suplente: p.parlamentares?.is_suplente || false,
         em_exercicio: p.parlamentares?.em_exercicio || true,
-        perfil: bestPerfil
+        perfil: bestPerfil,
+        perfis_ids: p.usuario_perfis?.map((up: any) => up.perfil_id) || []
       };
     });
   },
 
-  async criarUsuario(dados: any, perfilTipo: string, camaraId: string) {
+  async criarUsuario(dados: any, perfisIds: string[], camaraId: string) {
     const senhaProvisoria = Math.floor(100000 + Math.random() * 900000).toString();
     const { data: authData, error: authError } = await supabaseAdminTemp.auth.signUp({
       email: dados.email, password: senhaProvisoria, options: { data: { nome: dados.nome } }
@@ -125,23 +139,16 @@ export const usuarioService = {
     const novoId = authData.user.id;
     await supabase.from('usuarios').insert({
       id: novoId, nome: dados.nome, email: dados.email, whatsapp: dados.whatsapp, 
-      camara_id: camaraId || null, ativo: false, senha_provisoria: senhaProvisoria, senha_alterada: false
+      camara_id: camaraId || null, ativo: false, senha_alterada: false
     });
 
-    let perfilId = null;
-    // Se for admin, busca perfil global, senão busca perfil da câmara
-    const query = supabase.from('perfis').select('id').eq('tipo_base', perfilTipo);
-    if (perfilTipo === 'ADMIN') {
-      query.is('camara_id', null);
-    } else {
-      query.eq('camara_id', camaraId);
+    if (perfisIds && perfisIds.length > 0) {
+      const inserts = perfisIds.map(pid => ({ usuario_id: novoId, perfil_id: pid }));
+      await supabase.from('usuario_perfis').insert(inserts);
     }
     
-    const { data: lp } = await query.maybeSingle();
-    if (lp) perfilId = lp.id;
-
-    if (perfilId) await supabase.from('usuario_perfis').insert({ usuario_id: novoId, perfil_id: perfilId });
-    if (['VEREADOR', 'PRESIDENTE'].includes(perfilTipo)) await supabase.from('parlamentares').insert({ id: novoId, partido: dados.partido || 'SGLM' });
+    // Tratamos a inserção na 'parlamentares' independente (todos tem registro mestre lá pra simplificar na câmara)
+    await supabase.from('parlamentares').insert({ id: novoId, partido: dados.partido || 'SGLM' });
 
     return { senhaProvisoria };
   },
@@ -150,31 +157,39 @@ export const usuarioService = {
     await supabase.from('usuarios').update({ nome: dados.nome, email: dados.email, whatsapp: dados.whatsapp, ativo: dados.ativo }).eq('id', usuarioId);
     const { data: isParl } = await supabase.from('parlamentares').select('id').eq('id', usuarioId).maybeSingle();
     if (isParl) await supabase.from('parlamentares').update({ partido: dados.partido, cargo_mesa: dados.cargo_mesa, is_suplente: dados.is_suplente, em_exercicio: dados.em_exercicio }).eq('id', usuarioId);
+
+    if (dados.perfis_ids && Array.isArray(dados.perfis_ids)) {
+      const { error: delErr } = await supabase.from('usuario_perfis').delete().eq('usuario_id', usuarioId);
+      if (delErr) throw new Error(`Falha ao remover perfis antigos: ${delErr.message}. Você rodou a migration 24?`);
+      
+      if (dados.perfis_ids.length > 0) {
+        const inserts = dados.perfis_ids.map((pid: string) => ({ usuario_id: usuarioId, perfil_id: pid }));
+        const { error: insErr } = await supabase.from('usuario_perfis').insert(inserts);
+        if (insErr) throw new Error(`Falha ao inserir novos perfis: ${insErr.message} | Payload: ${JSON.stringify(inserts)}`);
+      }
+    }
   },
 
   async resetarSenha(usuarioId: string) {
     const novaSenha = Math.floor(100000 + Math.random() * 900000).toString();
-    await supabase.from('usuarios').update({ senha_provisoria: novaSenha, senha_alterada: false, ativo: false }).eq('id', usuarioId);
+    const { error } = await supabase.rpc('admin_resetar_senha', { 
+      p_user_id: usuarioId, 
+      p_nova_senha: novaSenha 
+    });
+    if (error) throw error;
     return novaSenha;
   },
 
   /**
-   * Exclui um usuário permanentemente do sistema.
-   * O banco de dados está configurado com ON DELETE CASCADE em parlamentares e perfis,
-   * mas trataremos erros de restrição referencial (ex: se ele for autor de uma lei/sessão).
+   * Exclui um usuário permanentemente do sistema da maneira mais letal possível: Matando-o do Auth Core.
+   * Aciona ON DELETE CASCADE no Postgres e dropa as pontas do perfil soltas nas nossas tabelas orgânicas.
    */
   async excluirUsuario(usuarioId: string) {
-    // Tentamos excluir primeiro do Supabase Auth (via Edge Function ou Client Admin se disponível)
-    // No contexto atual, excluiremos da tabela pública 'usuarios'.
-    // Devido às Foreign Keys, se houver dependências não-cascade, o banco retornará erro.
-    const { error } = await supabase
-      .from('usuarios')
-      .delete()
-      .eq('id', usuarioId);
-
+    const { error } = await supabase.rpc('admin_excluir_usuario', { p_user_id: usuarioId });
     if (error) {
-      if (error.code === '23503') {
-        throw new Error('Não é possível excluir este usuário pois ele possui registros vinculados (votos, sessões ou proposições) que impedem a remoção por segurança histórica.');
+      console.error("[SGLM] Erro letal ao remover na Master DB:", error);
+      if (error.code === '23503' || error.message?.includes('violates foreign key')) {
+        throw new Error('Não é possível excluir este usuário pois ele possui registros históricos (votos ou sessões) vinculados.');
       }
       throw error;
     }

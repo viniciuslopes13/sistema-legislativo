@@ -22,7 +22,7 @@ export const PrimeiroAcessoPage = () => {
 
       const { error: dbError } = await supabase
         .from('usuarios')
-        .update({ senha_alterada: true, senha_provisoria: null, ativo: true })
+        .update({ senha_alterada: true, ativo: true })
         .eq('id', userId);
       
       if (dbError) throw dbError;
@@ -40,16 +40,16 @@ export const PrimeiroAcessoPage = () => {
   if (!email) return <Navigate to="/login" />;
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-      <div className="max-w-md w-full bg-slate-800 rounded-2xl p-8 border border-slate-700">
-        <h2 className="text-2xl font-bold text-white mb-2">Primeiro Acesso</h2>
-        <p className="text-slate-400 mb-6">Olá {email}, por segurança você precisa definir uma nova senha definitiva.</p>
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div className="max-w-md w-full bg-white rounded-[2rem] p-10 shadow-xl border border-gray-100">
+        <h2 className="text-3xl font-black text-gray-900 mb-2">Primeiro Acesso</h2>
+        <p className="text-gray-500 font-medium mb-8">Olá <span className="font-bold text-gray-700">{email}</span>, por segurança você precisa definir uma nova senha definitiva.</p>
         
-        <form onSubmit={handleReset} className="space-y-4">
+        <form onSubmit={handleReset} className="space-y-6">
           <input
             type="password"
-            placeholder="Nova senha"
-            className="w-full p-3 bg-slate-900 border border-slate-700 rounded-xl text-white"
+            placeholder="Digite a nova senha..."
+            className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-4 focus:ring-blue-500/10 font-bold text-gray-700 transition-all"
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
             required

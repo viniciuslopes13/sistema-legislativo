@@ -9,10 +9,16 @@ import { IndicadorQuorum } from '../../components/Legislativo/IndicadorQuorum';
 import { ItemPautaDestaque } from '../../components/Legislativo/ItemPautaDestaque';
 import { CardVotacao } from '../../components/Legislativo/CardVotacao';
 
+import { useAuthContext } from '../../context/AuthContext';
+import { useSessaoAtivaContext } from '../../context/SessaoAtivaContext';
+
 /**
  * Painel Principal do Vereador (Tema Claro).
  */
-export const PainelVereadorPage = ({ state }: { state: any }) => {
+export const PainelVereadorPage = () => {
+  const auth = useAuthContext();
+  const sessaoCtx = useSessaoAtivaContext();
+  const state = { ...auth, ...sessaoCtx };
   const [hasVoted, setHasVoted] = useState(false);
   const [lastVote, setLastVote] = useState<string | null>(null);
 

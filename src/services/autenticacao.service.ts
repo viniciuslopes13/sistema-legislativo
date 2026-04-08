@@ -30,25 +30,19 @@ export const autenticacaoService = {
         password: pass,
       });
       if (error) throw error;
-      return { user: data.user, session: data.session, isProvisional: false };
-    } catch (authError) {
-      // Caso o login falhe no Auth, verificamos se existe uma senha provisória no banco
+      
+      // O usuário logou autenticamente (seja com senha definitiva ou com a senha de primeiro acesso nativa).
+      // Agora verificamos se ele deve alterar a senha no primeiro acesso investigando sua flag de perfil.
       const { data: usuario, error: dbError } = await supabase
         .from('usuarios')
-        .select('id, email, senha_provisoria, senha_alterada')
-        .eq('email', email)
+        .select('id, email, senha_alterada')
+        .eq('id', data.user.id)
         .single();
+        
+      const isProvisional = !dbError && usuario && usuario.senha_alterada === false;
 
-      if (!dbError && usuario) {
-        // Se a senha não foi alterada e coincide com a provisória
-        if (!usuario.senha_alterada && usuario.senha_provisoria === pass) {
-          return { 
-            user: { id: usuario.id, email: usuario.email }, 
-            isProvisional: true 
-          };
-        }
-      }
-      
+      return { user: data.user, session: data.session, isProvisional };
+    } catch (authError) {
       throw authError;
     }
   },

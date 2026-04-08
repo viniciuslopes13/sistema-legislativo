@@ -1,13 +1,13 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { useSGLM } from '../context/SGLMContext';
+import { useAuthContext } from '../context/AuthContext';
 
 /**
  * Guard para rotas que exigem autenticação.
  * Exemplo: Todo o sistema interno (/sistema).
  */
 export const RotaPrivada = ({ children }: { children: React.ReactNode }) => {
-  const { usuarioAtual, autenticacaoPronta } = useSGLM();
+  const { usuarioAtual, autenticacaoPronta } = useAuthContext();
   const location = useLocation();
 
   if (!autenticacaoPronta) {
@@ -21,6 +21,11 @@ export const RotaPrivada = ({ children }: { children: React.ReactNode }) => {
   if (!usuarioAtual) {
     // Salvamos a rota que o usuário tentou acessar para redirecioná-lo após o login
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // Barreira extra rigorosa: se a senha for provisória, bloqueia completamente as rotas de sistema.
+  if (usuarioAtual.senha_alterada === false) {
+    return <Navigate to="/reset-password" replace />;
   }
 
   return <>{children}</>;

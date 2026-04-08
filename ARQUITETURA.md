@@ -54,6 +54,12 @@ O banco de dados PostgreSQL (Supabase) atua como o último e mais forte seguran�
 ### 2.3. Auditoria e Logs
 Tabela `logs_eventos` alimentada por **Database Triggers**. Toda ação crítica (voto, início de sessão, alteração de usuário) é registrada com timestamp e metadados de quem realizou a operação.
 
+### 2.4. Paradigma RBAC Orientado a Operações (Role-Based Access Control)
+O SGLM abandonou verificações estáticas de cargo (ex: `is_presidente`) e adota um **Mapeamento Absoluto Baseado em Operações (`temPermissao('NOME_DA_OPERACAO')`)**.
+*   **A Abstração:** Perfis (ex: *Vereador*, *Presidente*) são apenas agrupadores de **Operações Técnicas** (ex: `VOTAR`, `SESSAO_GERENCIAR`, `PAINEL_VISUALIZAR`).
+*   **Extensibilidade:** Para injetar futuras restrições ou novas telas, a UI **nunca** deve focar em qual "posição" o usuário atua. Deve-se criar uma nova Operação e inseri-la na proteção da tela via TypeScript (ex: `temPermissao('FROTA_GERENCIAR')`). O administrador irá assinalar via Dashboard essa operação aos devidos papéis.
+*   **Reflexo no Front/Back:** As verificações devem sempre parear o `UI Guard/temPermissao` no React com uma equivalente validação RLS ou Backend.
+
 ---
 
 ## 3. Identidade Visual e UX

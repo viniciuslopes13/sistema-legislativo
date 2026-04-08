@@ -8,6 +8,7 @@ O **SGLM** é uma plataforma de nível profissional para gestão de sessões ple
 - **Tempo Real (Supabase Realtime):** Sincronização instantânea de votações, presenças e cronômetros de fase.
 - **Multi-tenancy:** Suporte a múltiplas Câmaras Municipais com isolamento total de dados via Row Level Security (RLS).
 - **Segurança Avançada:** Proteção de rotas via Guards e auditoria nativa no banco de dados.
+- **Paradigma de Permissões (RBAC Puro):** As views e funcionalidades não dependem de cargos rígidos. Todas as travas são orientadas a Operações configuráveis (ex: em vez de "É Presidente?", o sistema pergunta "Tem permissão para GERENCIAR_SESSAO?"). Qualquer nova aba ou funcionalidade futura deve ser atrelada à estrutura de operações.
 - **Interface Moderna (Tema Claro):** UX refinada com sistema de notificações (Toasts) e modais customizados.
 - **Portal de Transparência:** Telão público para acompanhamento populacional em tempo real com busca de municípios.
 

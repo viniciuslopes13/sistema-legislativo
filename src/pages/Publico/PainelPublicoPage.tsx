@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useSGLM } from '../../context/SGLMContext'; // Usando o novo contexto
+import { useAuthContext } from '../../context/AuthContext';
+import { useGestao } from '../../hooks/useGestao';
+import { useSessaoAtiva } from '../../hooks/useSessaoAtiva';
 import { IndicadorQuorum } from '../../components/Legislativo/IndicadorQuorum';
 import { ItemPautaDestaque } from '../../components/Legislativo/ItemPautaDestaque';
 import { Building2, Search, Monitor, ArrowLeft } from 'lucide-react';
@@ -13,7 +15,11 @@ import { cn } from '../../lib/utils';
 export const PainelPublicoPage = () => {
   const { camaraId } = useParams<{ camaraId: string }>();
   const navigate = useNavigate();
-  const state = useSGLM(); // Estado compartilhado
+  const auth = useAuthContext();
+  const gestao = useGestao(camaraId);
+  const sessao = useSessaoAtiva(camaraId);
+  
+  const state = { ...auth, ...gestao, ...sessao };
   
   const { faseAtual, itens, quorum, autenticacaoPronta, camaras } = state;
   const [termoPesquisa, setTermoPesquisa] = useState('');

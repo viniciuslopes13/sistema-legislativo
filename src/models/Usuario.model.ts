@@ -12,7 +12,13 @@ export class Usuario {
   public readonly permissoes: string[];
   public readonly partido?: string;
   public readonly foto_url?: string;
+  public readonly whatsapp?: string;
+  public readonly cargo_mesa?: string;
+  public readonly is_suplente: boolean;
+  public readonly em_exercicio: boolean;
   public readonly ativo: boolean;
+  public readonly senha_alterada: boolean;
+  public readonly perfis_ids: string[];
 
   constructor(dados: ParlamentarDTO) {
     this.id = dados.id;
@@ -23,25 +29,19 @@ export class Usuario {
     this.permissoes = dados.permissoes || [];
     this.partido = dados.partido;
     this.foto_url = dados.foto_url;
+    this.whatsapp = dados.whatsapp;
+    this.cargo_mesa = dados.cargo_mesa;
+    this.is_suplente = dados.is_suplente || false;
+    this.em_exercicio = dados.em_exercicio ?? true;
     this.ativo = dados.ativo;
+    this.senha_alterada = dados.senha_alterada ?? true;
+    this.perfis_ids = dados.perfis_ids || [];
   }
 
   public temPermissao(codigo: string): boolean {
-    if (this.perfil === 'ADMIN') return true;
     return this.permissoes.includes(codigo);
   }
 
-  public ePresidente(): boolean {
-    return this.perfil === 'PRESIDENTE';
-  }
-
-  public eAdminGlobal(): boolean {
-    return this.perfil === 'ADMIN';
-  }
-
-  public eParlamentar(): boolean {
-    return ['VEREADOR', 'PRESIDENTE', 'SECRETARIO'].includes(this.perfil);
-  }
 
   public static deDTO(dto: ParlamentarDTO): Usuario {
     return new Usuario(dto);

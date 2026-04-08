@@ -7,12 +7,13 @@ import {
   useNavigate
 } from 'react-router-dom';
 
-// --- Contextos Globais ---
-import { SGLMProvider, useSGLM } from './context/SGLMContext';
+import { AppProviders } from './context/AppProviders';
+import { useAuthContext } from './context/AuthContext';
+import { useGestaoContext } from './context/GestaoContext';
 import { ToastProvider } from './context/ToastContext';
 
-// --- Guards de Proteção ---
 import { RotaPublica } from './guards/RotaPublica';
+import { PrimeiroAcessoGuard } from './guards/PrimeiroAcessoGuard';
 import { RotaPrivada } from './guards/RotaPrivada';
 import { PermissaoGuard } from './guards/PermissaoGuard';
 import { AdminGlobalGuard } from './guards/AdminGlobalGuard';
@@ -43,8 +44,8 @@ import { autenticacaoService } from './services/autenticacao.service';
  * Layout Interno do Sistema.
  */
 const InternalSystemLayout = () => {
-  const state = useSGLM();
-  const { usuarioAtual, camaras, autenticacaoPronta } = state;
+  const { usuarioAtual, autenticacaoPronta, sair } = useAuthContext();
+  const { camaras } = useGestaoContext();
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   const navigate = useNavigate();
 
@@ -56,7 +57,7 @@ const InternalSystemLayout = () => {
   }, [usuarioAtual, autenticacaoPronta, navigate]);
 
   const handleLogout = async () => {
-    await state.sair();
+    await sair();
   };
 
   const currentCamara = camaras.find(c => c.id === usuarioAtual?.camara_id);
@@ -108,11 +109,13 @@ const InternalSystemLayout = () => {
             <div>
               <div className="px-3 py-2 text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Navegação</div>
               <div className="space-y-1">
-                <button onClick={() => navigate('/sistema')} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all text-left">
-                  <Layout className="w-5 h-5" /> Painel Principal
-                </button>
+                {usuarioAtual?.temPermissao('PAINEL_VISUALIZAR') && (
+                  <button onClick={() => navigate('/sistema')} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all text-left">
+                    <Layout className="w-5 h-5" /> Painel Principal
+                  </button>
+                )}
 
-                {usuarioAtual?.temPermissao('SESSAO_CRIAR') && (
+                {usuarioAtual?.temPermissao('GERENCIAR_USUARIOS_E_CAMARAS') && (
                   <button onClick={() => navigate('/sistema/gestao')} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all text-left">
                     <ShieldCheck className="w-5 h-5" /> Gestão Legislativa
                   </button>
@@ -145,12 +148,18 @@ const InternalSystemLayout = () => {
 
         <div className="flex-1 overflow-y-auto">
           <Routes>
-            <Route index element={usuarioAtual?.ePresidente() ? <PainelPresidentePage state={state} /> : <PainelVereadorPage state={state} />} />
+            <Route index element={
+              usuarioAtual?.temPermissao('SISTEMA_ADMINISTRAR_TENANTS') 
+                ? <Navigate to="gestao" replace /> 
+                : usuarioAtual?.temPermissao('SESSAO_GERENCIAR') 
+                  ? <PainelPresidentePage /> 
+                  : <PainelVereadorPage />
+            } />
             <Route 
               path="gestao" 
               element={
-                <PermissaoGuard codigo="USUARIO_CRIAR">
-                  <GestaoSistemaPage state={state} />
+                <PermissaoGuard codigo="GERENCIAR_USUARIOS_E_CAMARAS">
+                  <GestaoSistemaPage />
                 </PermissaoGuard>
               } 
             />
@@ -168,17 +177,17 @@ const InternalSystemLayout = () => {
 function App() {
   return (
     <ToastProvider>
-      <SGLMProvider>
+      <AppProviders>
         <Router>
           <Routes>
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<RotaPublica><LoginPage /></RotaPublica>} />
-            <Route path="/reset-password" element={<RotaPublica><PrimeiroAcessoPage /></RotaPublica>} />
+            <Route path="/reset-password" element={<PrimeiroAcessoGuard><PrimeiroAcessoPage /></PrimeiroAcessoGuard>} />
             <Route path="/sistema/*" element={<InternalSystemLayout />} />
             <Route path="/publico/:camaraId?" element={<PainelPublicoPage />} />
           </Routes>
         </Router>
-      </SGLMProvider>
+      </AppProviders>
     </ToastProvider>
   );
 }

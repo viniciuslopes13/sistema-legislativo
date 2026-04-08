@@ -9,6 +9,7 @@ export interface UsuarioDTO {
   email: string;
   whatsapp?: string;
   ativo: boolean;
+  senha_alterada?: boolean;
   camara_id?: string;
   created_at: string;
 }
@@ -24,4 +25,5 @@ export interface ParlamentarDTO extends UsuarioDTO {
   em_exercicio: boolean;
   perfil?: PerfilTipo; 
   permissoes?: string[]; 
+  perfis_ids?: string[];
 }

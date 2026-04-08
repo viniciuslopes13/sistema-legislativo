@@ -13,13 +13,19 @@ import { camaraService } from '../../services/camara.service';
 import { ConfirmModal } from '../../components/UI/ConfirmModal';
 import { useToast } from '../../context/ToastContext';
 
+import { useAuthContext } from '../../context/AuthContext';
+import { useGestaoContext } from '../../context/GestaoContext';
+
 /**
  * Página de Gestão do Sistema (Tema Claro).
  * Atualizada com Modais de Confirmação e Toasts.
  */
-export const GestaoSistemaPage = ({ state }: { state: any }) => {
+export const GestaoSistemaPage = () => {
+  const auth = useAuthContext();
+  const gestao = useGestaoContext();
+  const state = { ...auth, ...gestao };
   const { showToast } = useToast();
-  const [activeTab, setActiveTab] = useState<'users' | 'camaras'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'camaras' | 'perfis'>('users');
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -37,20 +43,23 @@ export const GestaoSistemaPage = ({ state }: { state: any }) => {
 
   const [formData, setFormData] = useState({
     nome: '', email: '', whatsapp: '', partido: '', 
-    perfil: 'VEREADOR', camara_id: state.usuarioAtual?.camara_id || '',
+    perfis_ids: [] as string[], camara_id: state.usuarioAtual?.camara_id || '',
     ativo: true, cargo_mesa: '', is_suplente: false, em_exercicio: true
+  });
+  const [perfilData, setPerfilData] = useState({
+    nome: '', tipo_base: 'VEREADOR' as any, camara_id: '', operacoes_ids: [] as string[]
   });
 
   const [camaraData, setCamaraData] = useState({
     nome: '', cidade: '', estado: '', ativo: true
   });
 
-  const isAdmin = state.usuarioAtual?.eAdminGlobal();
+  const isAdmin = state.usuarioAtual?.temPermissao('SISTEMA_ADMINISTRAR_TENANTS');
 
   const resetUserForm = () => {
     setFormData({
       nome: '', email: '', whatsapp: '', partido: '', 
-      perfil: 'VEREADOR', camara_id: state.usuarioAtual?.camara_id || '',
+      perfis_ids: [], camara_id: state.usuarioAtual?.camara_id || '',
       ativo: true, cargo_mesa: '', is_suplente: false, em_exercicio: true
     });
     setEditingId(null);
@@ -60,7 +69,7 @@ export const GestaoSistemaPage = ({ state }: { state: any }) => {
   const handleEditUser = (user: any) => {
     setFormData({
       nome: user.nome, email: user.email, whatsapp: user.whatsapp || '',
-      partido: user.partido || '', perfil: user.perfil || 'VEREADOR',
+      partido: user.partido || '', perfis_ids: user.perfis_ids || [],
       camara_id: user.camara_id, ativo: user.ativo, cargo_mesa: user.cargo_mesa || '',
       is_suplente: user.is_suplente || false, em_exercicio: user.em_exercicio ?? true
     });
@@ -76,6 +85,13 @@ export const GestaoSistemaPage = ({ state }: { state: any }) => {
     setActiveTab('camaras');
   };
 
+  const handleEditPerfil = (perfil: any) => {
+    setPerfilData({ nome: perfil.nome, tipo_base: perfil.tipo_base, camara_id: perfil.camara_id || '', operacoes_ids: perfil.operacoes_ids || [] });
+    setEditingId(perfil.id);
+    setIsAdding(true);
+    setActiveTab('perfis');
+  };
+
   // --- Funções de Exclusão ---
   const confirmarExclusao = async () => {
     setLoading(true);
@@ -87,11 +103,11 @@ export const GestaoSistemaPage = ({ state }: { state: any }) => {
         await camaraService.excluirCamara(modalExcluir.id);
         showToast('Câmara excluída com sucesso!');
       }
-      setModalExcluir({ ...modalExcluir, open: false });
     } catch (err: any) {
       showToast(err.message, 'error');
     } finally {
       setLoading(false);
+      setModalExcluir({ ...modalExcluir, open: false });
     }
   };
 
@@ -120,6 +136,16 @@ export const GestaoSistemaPage = ({ state }: { state: any }) => {
   const totalPaginasCamaras = Math.ceil(camarasFiltradas.length / itensPorPagina);
   const camarasPaginadas = camarasFiltradas.slice((paginaAtual - 1) * itensPorPagina, paginaAtual * itensPorPagina);
 
+  const perfisFiltrados = useMemo(() => {
+    return (state.perfis || []).filter((c: any) => 
+      c.nome.toLowerCase().includes(busca.toLowerCase()) || 
+      c.tipo_base.toLowerCase().includes(busca.toLowerCase())
+    );
+  }, [state.perfis, busca]);
+
+  const totalPaginasPerfis = Math.ceil(perfisFiltrados.length / itensPorPagina);
+  const perfisPaginados = perfisFiltrados.slice((paginaAtual - 1) * itensPorPagina, paginaAtual * itensPorPagina);
+
   const handleSubmitUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -129,7 +155,7 @@ export const GestaoSistemaPage = ({ state }: { state: any }) => {
         showToast('Usuário atualizado!');
       } else {
         const finalData = isAdmin ? formData : { ...formData, camara_id: state.usuarioAtual?.camara_id };
-        const result = await state.criarUsuario(finalData, formData.perfil);
+        const result = await state.criarUsuario(finalData, formData.perfis_ids);
         if (result?.senhaProvisoria) showToast(`Usuário criado! SENHA: ${result.senhaProvisoria}`, 'info');
         else showToast('Usuário cadastrado com sucesso!');
       }
@@ -154,11 +180,26 @@ export const GestaoSistemaPage = ({ state }: { state: any }) => {
       }
       setIsAdding(false);
       setEditingId(null);
-    } catch (err: any) {
-      showToast(err.message, 'error');
-    } finally {
-      setLoading(false);
-    }
+    } catch (err: any) { showToast(err.message, 'error'); } finally { setLoading(false); }
+  };
+
+  const handleSubmitPerfil = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const pD = isAdmin ? perfilData : { ...perfilData, camara_id: state.usuarioAtual?.camara_id || '' };
+      if (!pD.camara_id) delete (pD as any).camara_id;
+      
+      if (editingId) {
+        await state.atualizarPerfil(editingId, pD);
+        showToast('Perfil atualizado!');
+      } else {
+        await state.criarPerfil(pD);
+        showToast('Perfil cadastrado!');
+      }
+      setIsAdding(false);
+      setEditingId(null);
+    } catch (err: any) { showToast(err.message, 'error'); } finally { setLoading(false); }
   };
 
   return (
@@ -172,17 +213,14 @@ export const GestaoSistemaPage = ({ state }: { state: any }) => {
           </div>
           <div className="flex gap-3">
             {isAdmin && (
-              <button 
-                onClick={() => { resetUserForm(); setActiveTab('camaras'); setIsAdding(true); }} 
-                className={cn("px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg", activeTab === 'camaras' && isAdding && !editingId ? "bg-blue-600 text-white" : "bg-white text-gray-600 border border-gray-100")}
-              >
+              <button onClick={() => { resetUserForm(); setActiveTab('camaras'); setIsAdding(true); }} className={cn("px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg", activeTab === 'camaras' && isAdding && !editingId ? "bg-blue-600 text-white" : "bg-white text-gray-600 border border-gray-100")}>
                 <Building2 size={20} /> Nova Câmara
               </button>
             )}
-            <button 
-              onClick={() => { resetUserForm(); setActiveTab('users'); setIsAdding(true); }} 
-              className={cn("px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg", activeTab === 'users' && isAdding && !editingId ? "bg-blue-600 text-white" : "bg-white text-gray-600 border border-gray-100")}
-            >
+            <button onClick={() => { resetUserForm(); setPerfilData({ nome: '', tipo_base: 'VEREADOR', camara_id: state.usuarioAtual?.camara_id || '', operacoes_ids: [] }); setActiveTab('perfis'); setIsAdding(true); }} className={cn("px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg", activeTab === 'perfis' && isAdding && !editingId ? "bg-blue-600 text-white" : "bg-white text-gray-600 border border-gray-100")}>
+              <Shield size={20} /> Novo Perfil
+            </button>
+            <button onClick={() => { resetUserForm(); setActiveTab('users'); setIsAdding(true); }} className={cn("px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg", activeTab === 'users' && isAdding && !editingId ? "bg-blue-600 text-white" : "bg-white text-gray-600 border border-gray-100")}>
               <UserCheck size={20} /> Novo Usuário
             </button>
           </div>
@@ -192,11 +230,9 @@ export const GestaoSistemaPage = ({ state }: { state: any }) => {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="flex gap-2 p-1 bg-white rounded-2xl border border-gray-200 shadow-sm w-fit">
             <button onClick={() => { setActiveTab('users'); setPaginaAtual(1); setBusca(''); }} className={cn("px-6 py-2.5 rounded-xl text-sm font-bold transition-all", activeTab === 'users' ? "bg-blue-600 text-white shadow-md" : "text-gray-500 hover:text-blue-600")}>Usuários</button>
+            <button onClick={() => { setActiveTab('perfis'); setPaginaAtual(1); setBusca(''); }} className={cn("px-6 py-2.5 rounded-xl text-sm font-bold transition-all", activeTab === 'perfis' ? "bg-blue-600 text-white shadow-md" : "text-gray-500 hover:text-blue-600")}>Matriz RBAC</button>
             {isAdmin && (
-              <button 
-                onClick={() => { setActiveTab('camaras'); setPaginaAtual(1); setBusca(''); }} 
-                className={cn("px-6 py-2.5 rounded-xl text-sm font-bold transition-all", activeTab === 'camaras' ? "bg-blue-600 text-white shadow-md" : "text-gray-500 hover:text-blue-600")}
-              >
+              <button onClick={() => { setActiveTab('camaras'); setPaginaAtual(1); setBusca(''); }} className={cn("px-6 py-2.5 rounded-xl text-sm font-bold transition-all", activeTab === 'camaras' ? "bg-blue-600 text-white shadow-md" : "text-gray-500 hover:text-blue-600")}>
                 Câmaras
               </button>
             )}
@@ -214,12 +250,51 @@ export const GestaoSistemaPage = ({ state }: { state: any }) => {
                   <h3 className="text-2xl font-black text-gray-900">{editingId ? 'Editar Registro' : 'Novo Cadastro'}</h3>
                   <button onClick={() => setIsAdding(false)} className="p-2 text-gray-400 hover:text-red-500"><XCircle size={24}/></button>
                </div>
-               <form onSubmit={activeTab === 'users' ? handleSubmitUser : handleSubmitCamara} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+               <form onSubmit={activeTab === 'users' ? handleSubmitUser : activeTab === 'camaras' ? handleSubmitCamara : handleSubmitPerfil} className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {activeTab === 'camaras' ? (
                     <>
                       <div className="md:col-span-2"><input required value={camaraData.nome} onChange={e => setCamaraData({...camaraData, nome: e.target.value})} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none font-bold" placeholder="Nome da Câmara" /></div>
                       <input required value={camaraData.cidade} onChange={e => setCamaraData({...camaraData, cidade: e.target.value})} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none font-bold" placeholder="Cidade" />
                       <input required value={camaraData.estado} onChange={e => setCamaraData({...camaraData, estado: e.target.value})} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none font-bold" placeholder="Estado" />
+                    </>
+                  ) : activeTab === 'perfis' ? (
+                    <>
+                      <div className="md:col-span-2"><input required value={perfilData.nome} onChange={e => setPerfilData({...perfilData, nome: e.target.value})} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none font-bold" placeholder="Nome do Papel (Ex: Assessor PL)" /></div>
+                      <select required value={perfilData.tipo_base} onChange={e => setPerfilData({...perfilData, tipo_base: e.target.value})} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none font-bold text-gray-700">
+                        <option value="VEREADOR">Base: Vereador</option>
+                        <option value="PRESIDENTE">Base: Presidente</option>
+                        <option value="SECRETARIO">Base: Secretário</option>
+                        <option value="ADMIN">Base: Administrador</option>
+                      </select>
+                      {isAdmin && (
+                        <select value={perfilData.camara_id} onChange={e => setPerfilData({...perfilData, camara_id: e.target.value})} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none font-bold text-gray-700">
+                          <option value="">Global (Todas as Câmaras)</option>
+                          {state.camaras.map((c: any) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                        </select>
+                      )}
+                      <div className="md:col-span-2 mt-4">
+                        <label className="block text-sm font-bold text-gray-700 mb-3">Matriz de Acessos (Operações Liberadas)</label>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {state.operacoes.map(op => (
+                            <label key={op.id} className="flex flex-row items-start gap-3 p-3 bg-gray-50 border border-gray-200 rounded-xl cursor-pointer hover:bg-blue-50 transition-colors">
+                              <input 
+                                type="checkbox" className="mt-1 w-4 h-4 text-blue-600 rounded"
+                                checked={perfilData.operacoes_ids.includes(op.id)}
+                                onChange={(e) => {
+                                  const ids = e.target.checked 
+                                    ? [...perfilData.operacoes_ids, op.id]
+                                    : perfilData.operacoes_ids.filter(id => id !== op.id);
+                                  setPerfilData({...perfilData, operacoes_ids: ids});
+                                }}
+                              />
+                              <div className="flex flex-col">
+                                <span className="text-xs font-black text-gray-800">{op.codigo}</span>
+                                <span className="text-[10px] text-gray-500 leading-tight">{op.descricao}</span>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
                     </>
                   ) : (
                     <>
@@ -227,20 +302,33 @@ export const GestaoSistemaPage = ({ state }: { state: any }) => {
                       <input required type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none font-bold" placeholder="E-mail" disabled={!!editingId} />
                       <input value={formData.whatsapp} onChange={e => setFormData({...formData, whatsapp: e.target.value})} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none font-bold" placeholder="WhatsApp" />
                       <input value={formData.partido} onChange={e => setFormData({...formData, partido: e.target.value})} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none font-bold" placeholder="Partido" />
-                      {isAdmin && !editingId && (
-                        <select value={formData.perfil} onChange={e => setFormData({...formData, perfil: e.target.value})} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none font-bold text-gray-700">
-                          <option value="VEREADOR">Vereador</option>
-                          <option value="PRESIDENTE">Presidente da Câmara</option>
-                          <option value="SECRETARIO">Secretário</option>
-                          <option value="ADMIN">Administrador Global</option>
-                        </select>
-                      )}
-                      {isAdmin && !editingId && (
+                      {isAdmin && (
                         <select required value={formData.camara_id} onChange={e => setFormData({...formData, camara_id: e.target.value})} className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none font-bold text-gray-700">
                           <option value="">Selecione a Câmara</option>
                           {state.camaras.map((c: any) => <option key={c.id} value={c.id}>{c.nome}</option>)}
                         </select>
                       )}
+                      
+                      <div className="md:col-span-2 mt-4">
+                        <label className="block text-sm font-bold text-gray-700 mb-3">Papéis do Usuário (Cargos)</label>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {state.perfis.map(pf => (
+                            <label key={pf.id} className="flex items-center gap-3 p-3 bg-gray-50 border border-gray-200 rounded-xl cursor-pointer hover:bg-blue-50 transition-colors">
+                              <input 
+                                type="checkbox" className="w-5 h-5 text-blue-600 rounded"
+                                checked={formData.perfis_ids.includes(pf.id)}
+                                onChange={(e) => {
+                                  const ids = e.target.checked 
+                                    ? [...formData.perfis_ids, pf.id]
+                                    : formData.perfis_ids.filter(id => id !== pf.id);
+                                  setFormData({...formData, perfis_ids: ids});
+                                }}
+                              />
+                              <span className="font-bold text-gray-800">{pf.nome} <span className="text-xs font-normal text-gray-400">({pf.tipo_base})</span></span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
                     </>
                   )}
                   <div className="md:col-span-2 flex gap-4 pt-6 border-t border-gray-100">
@@ -255,8 +343,8 @@ export const GestaoSistemaPage = ({ state }: { state: any }) => {
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200 text-center">
-                      <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-widest text-left">{activeTab === 'users' ? 'Usuário / Parlamentar' : 'Câmara / Instituição'}</th>
-                      <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">Status</th>
+                      <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-widest text-left">{activeTab === 'users' ? 'Usuário / Parlamentar' : activeTab === 'perfis' ? 'Perfil Base' : 'Câmara / Instituição'}</th>
+                      <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-widest">{activeTab === 'perfis' ? 'Base Herdada' : 'Status'}</th>
                       <th className="px-8 py-5 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Ações</th>
                     </tr>
                   </thead>
@@ -285,6 +373,26 @@ export const GestaoSistemaPage = ({ state }: { state: any }) => {
                           </div>
                         </td>
                       </tr>
+                    )) : activeTab === 'perfis' ? perfisPaginados.map((pf: any) => (
+                      <tr key={pf.id} className="hover:bg-gray-50/50 transition-colors group">
+                        <td className="px-8 py-5">
+                          <p className="font-black text-gray-900">{pf.nome}</p>
+                          <p className="text-xs text-gray-500 font-medium">
+                            {pf.camara_id ? state.camaras.find(c => c.id === pf.camara_id)?.nome : 'Perfil Global'} | {pf.operacoes_ids?.length || 0} Acessos
+                          </p>
+                        </td>
+                        <td className="px-8 py-5 text-center">
+                          <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase text-blue-600 bg-blue-50 border border-blue-100 w-fit mx-auto">
+                            {pf.tipo_base}
+                          </span>
+                        </td>
+                        <td className="px-8 py-5 text-right">
+                          <div className="flex justify-end gap-1">
+                            {isAdmin && <button onClick={() => handleEditPerfil(pf)} className="p-2.5 text-blue-600 hover:bg-blue-50 rounded-xl transition-all" title="Editar"><Edit2 size={18}/></button>}
+                            {isAdmin && <button onClick={() => setModalExcluir({ open: true, id: pf.id, nome: pf.nome, type: 'perfil' as any })} className="p-2.5 text-red-600 hover:bg-red-50 rounded-xl transition-all" title="Excluir"><Trash2 size={18}/></button>}
+                          </div>
+                        </td>
+                      </tr>
                     )) : camarasPaginadas.map((c: any) => (
                       <tr key={c.id} className="hover:bg-gray-50/50 transition-colors group">
                         <td className="px-8 py-5">
@@ -308,18 +416,18 @@ export const GestaoSistemaPage = ({ state }: { state: any }) => {
                   </tbody>
                 </table>
                 
-                {(activeTab === 'users' ? usuariosFiltrados.length : camarasFiltradas.length) === 0 && (
+                {(activeTab === 'users' ? usuariosFiltrados.length : activeTab === 'perfis' ? perfisFiltrados.length : camarasFiltradas.length) === 0 && (
                   <div className="py-20 text-center text-gray-400 font-black uppercase text-xs tracking-widest">Nenhum resultado encontrado</div>
                 )}
               </div>
 
               {/* Paginação */}
               <div className="flex justify-between items-center px-4">
-                <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Total: {activeTab === 'users' ? usuariosFiltrados.length : camarasFiltradas.length} itens</p>
+                <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest">Total: {activeTab === 'users' ? usuariosFiltrados.length : activeTab === 'perfis' ? perfisFiltrados.length : camarasFiltradas.length} itens</p>
                 <div className="flex items-center gap-4">
                   <button disabled={paginaAtual === 1} onClick={() => setPaginaAtual(p => p - 1)} className="p-2.5 bg-white border border-gray-200 rounded-xl disabled:opacity-30 hover:bg-gray-50 transition-colors shadow-sm"><ChevronLeft size={20} /></button>
-                  <span className="text-sm font-black text-gray-700 uppercase tracking-tighter">Página {paginaAtual} de {activeTab === 'users' ? Math.max(1, totalPaginasUsers) : Math.max(1, totalPaginasCamaras)}</span>
-                  <button disabled={paginaAtual === (activeTab === 'users' ? totalPaginasUsers : totalPaginasCamaras)} onClick={() => setPaginaAtual(p => p + 1)} className="p-2.5 bg-white border border-gray-200 rounded-xl disabled:opacity-30 hover:bg-gray-50 transition-colors shadow-sm"><ChevronRight size={20} /></button>
+                  <span className="text-sm font-black text-gray-700 uppercase tracking-tighter">Página {paginaAtual} de {activeTab === 'users' ? Math.max(1, totalPaginasUsers) : activeTab === 'perfis' ? Math.max(1, totalPaginasPerfis) : Math.max(1, totalPaginasCamaras)}</span>
+                  <button disabled={paginaAtual === (activeTab === 'users' ? totalPaginasUsers : activeTab === 'perfis' ? totalPaginasPerfis : totalPaginasCamaras)} onClick={() => setPaginaAtual(p => p + 1)} className="p-2.5 bg-white border border-gray-200 rounded-xl disabled:opacity-30 hover:bg-gray-50 transition-colors shadow-sm"><ChevronRight size={20} /></button>
                 </div>
               </div>
             </motion.div>
@@ -330,9 +438,17 @@ export const GestaoSistemaPage = ({ state }: { state: any }) => {
         <ConfirmModal 
           isOpen={modalExcluir.open}
           onClose={() => setModalExcluir({ ...modalExcluir, open: false })}
-          onConfirm={confirmarExclusao}
+          onConfirm={async () => {
+            if (modalExcluir.type === 'perfil') {
+              setLoading(true);
+              try { await state.excluirPerfil(modalExcluir.id); showToast('Perfil excluído!'); }
+              catch(e: any){ showToast(e.message, 'error'); } finally { setLoading(false); setModalExcluir({...modalExcluir, open: false}); }
+            } else {
+              confirmarExclusao();
+            }
+          }}
           loading={loading}
-          title={modalExcluir.type === 'user' ? 'Excluir Usuário' : 'Excluir Câmara'}
+          title={modalExcluir.type === 'user' ? 'Excluir Usuário' : modalExcluir.type === 'perfil' ? 'Excluir Perfil' : 'Excluir Câmara'}
           message={`Tem certeza que deseja excluir "${modalExcluir.nome}"? Esta ação é irreversível e será validada pelo sistema.`}
           confirmText="Excluir Permanentemente"
         />

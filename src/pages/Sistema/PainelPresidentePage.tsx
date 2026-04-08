@@ -9,8 +9,16 @@ import { motion } from 'motion/react';
 
 // Importação dos Componentes Reutilizáveis
 import { CronometroFase } from '../../components/Legislativo/CronometroFase';
+import { useAuthContext } from '../../context/AuthContext';
+import { useGestaoContext } from '../../context/GestaoContext';
+import { useSessaoAtivaContext } from '../../context/SessaoAtivaContext';
 
-export const PainelPresidentePage = ({ state }: { state: any }) => {
+export const PainelPresidentePage = () => {
+  const auth = useAuthContext();
+  const gestao = useGestaoContext();
+  const sessaoCtx = useSessaoAtivaContext();
+  
+  const state = { ...auth, ...gestao, ...sessaoCtx };
   const [activeSubTab, setActiveTab] = useState<'controle' | 'agenda'>('controle');
   const [isScheduling, setIsScheduling] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -21,7 +29,7 @@ export const PainelPresidentePage = ({ state }: { state: any }) => {
     template_id: ''
   });
 
-  const canOpenSessao = state.usuarioAtual?.ePresidente() || state.usuarioAtual?.eAdminGlobal();
+  const canOpenSessao = state.usuarioAtual?.temPermissao('SESSAO_ABRIR');
 
   const handleCreateSessao = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,19 +115,24 @@ export const PainelPresidentePage = ({ state }: { state: any }) => {
                     </div>
 
                     <div className="flex gap-3">
-                      <button 
-                        onClick={state.avancarFase}
-                        className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black flex items-center justify-center gap-3 hover:bg-blue-700 transition-all shadow-lg shadow-blue-100"
-                      >
-                        <FastForward size={20} />
-                        Próxima Fase
-                      </button>
-                      <button 
-                        onClick={() => state.encerrarSessao(state.sessao.id)}
-                        className="px-8 py-4 bg-red-50 text-red-600 rounded-2xl font-black hover:bg-red-100 transition-all border border-red-100"
-                      >
-                        Encerrar Sessão
-                      </button>
+                      {state.usuarioAtual?.temPermissao('SESSAO_AVANCAR') && (
+                        <button 
+                          onClick={state.avancarFase}
+                          className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black flex items-center justify-center gap-3 hover:bg-blue-700 transition-all shadow-lg shadow-blue-100"
+                        >
+                          <FastForward size={20} />
+                          Próxima Fase
+                        </button>
+                      )}
+                      
+                      {state.usuarioAtual?.temPermissao('SESSAO_ENCERRAR') && (
+                        <button 
+                          onClick={() => state.encerrarSessao(state.sessao.id)}
+                          className="px-8 py-4 bg-red-50 text-red-600 rounded-2xl font-black hover:bg-red-100 transition-all border border-red-100"
+                        >
+                          Encerrar Sessão
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -137,7 +150,7 @@ export const PainelPresidentePage = ({ state }: { state: any }) => {
                             <h4 className="font-bold text-gray-900 leading-tight">{item.titulo_manual}</h4>
                             <p className="text-xs text-gray-500 mt-1 line-clamp-1">{item.ementa_manual}</p>
                           </div>
-                          {state.faseAtual?.permite_votacao && (
+                          {state.faseAtual?.permite_votacao && state.usuarioAtual?.temPermissao('VOTACAO_INICIAR') && (
                             <button 
                               onClick={() => state.iniciarVotacao(item.id)}
                               disabled={state.votacaoAtiva?.item_id === item.id}
@@ -209,7 +222,12 @@ export const PainelPresidentePage = ({ state }: { state: any }) => {
 
         {activeSubTab === 'agenda' && (
           <div className="space-y-8">
-            {isScheduling ? (
+            {!state.usuarioAtual?.temPermissao('SESSAO_AGENDAR') ? (
+              <div className="bg-white p-10 rounded-[3rem] shadow-xl border border-gray-200 text-center">
+                <h3 className="text-2xl font-black text-gray-900 mb-2">Acesso Restrito</h3>
+                <p className="text-gray-500">Você não possui a operação SESSAO_AGENDAR ativa no seu perfil.</p>
+              </div>
+            ) : isScheduling ? (
               <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white p-10 rounded-[3rem] shadow-xl border border-gray-200">
                 <div className="flex justify-between items-center mb-8 border-b border-gray-100 pb-6">
                   <h3 className="text-2xl font-black text-gray-900">Agendar Nova Sessão</h3>

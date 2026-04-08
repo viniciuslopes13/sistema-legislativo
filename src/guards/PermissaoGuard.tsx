@@ -1,6 +1,6 @@
 import React from 'react';
 import { Navigate } from 'react-router-dom';
-import { useSGLM } from '../context/SGLMContext';
+import { useAuthContext } from '../context/AuthContext';
 
 interface PermissaoGuardProps {
   children: React.ReactNode;
@@ -11,7 +11,7 @@ interface PermissaoGuardProps {
  * Guard para rotas que exigem uma permissão específica.
  */
 export const PermissaoGuard: React.FC<PermissaoGuardProps> = ({ children, codigo }) => {
-  const { usuarioAtual } = useSGLM();
+  const { usuarioAtual } = useAuthContext();
 
   if (!usuarioAtual?.temPermissao(codigo)) {
     // Se não tem permissão, volta para a home do sistema
