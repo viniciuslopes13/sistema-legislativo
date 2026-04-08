@@ -2,11 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { ParlamentarDTO } from '../dtos/usuario.dto';
 
-const supabaseAdminTemp = createClient(
-  import.meta.env.VITE_SUPABASE_URL || '',
-  import.meta.env.VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || '',
-  { auth: { persistSession: false } }
-);
+
 
 export const usuarioService = {
   /**
@@ -130,13 +126,16 @@ export const usuarioService = {
 
   async criarUsuario(dados: any, perfisIds: string[], camaraId: string) {
     const senhaProvisoria = Math.floor(100000 + Math.random() * 900000).toString();
-    const { data: authData, error: authError } = await supabaseAdminTemp.auth.signUp({
-      email: dados.email, password: senhaProvisoria, options: { data: { nome: dados.nome } }
+    
+    // Invocando Edge Function de Admin, evitando gambiarra local com ANON_KEY
+    const { data: edgeData, error: edgeError } = await supabase.functions.invoke('admin-create-user', {
+      body: { email: dados.email, password: senhaProvisoria, nome: dados.nome }
     });
 
-    if (authError || !authData.user) throw authError || new Error('Auth fail');
+    if (edgeError) throw edgeError;
+    if (edgeData?.error) throw new Error(edgeData.error);
 
-    const novoId = authData.user.id;
+    const novoId = edgeData.user.id;
     await supabase.from('usuarios').insert({
       id: novoId, nome: dados.nome, email: dados.email, whatsapp: dados.whatsapp, 
       camara_id: camaraId || null, ativo: false, senha_alterada: false

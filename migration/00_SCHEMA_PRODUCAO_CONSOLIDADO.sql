@@ -1,23 +1,11 @@
--- SGLM - Migração Completa: Reset e Reconstrução (CORRIGIDA)
--- Este script limpa toda a base e recria a estrutura final baseada na especificação técnica.
+-- SGLM - ESTRUTURA CONSOLIDADA E OTIMIZADA FINAL
+-- Este script limpa toda a base e recria a estrutura final e livre de gambiarras/overlaps.
+-- Ideal para subir novos tenants/clientes ou restaurar ambiente de homologação.
 
--- 0. LIMPEZA TOTAL (Cuidado: apaga todos os dados!)
-DROP TABLE IF EXISTS votos CASCADE;
-DROP TABLE IF EXISTS votacoes CASCADE;
-DROP TABLE IF EXISTS itens_pauta CASCADE;
-DROP TABLE IF EXISTS presencas CASCADE;
-DROP TABLE IF EXISTS sessoes CASCADE;
-DROP TABLE IF EXISTS configuracao_fases CASCADE;
-DROP TABLE IF EXISTS templates_rito CASCADE;
-DROP TABLE IF EXISTS parlamentares CASCADE;
-DROP TABLE IF EXISTS usuario_perfis CASCADE;
-DROP TABLE IF EXISTS perfil_operacoes CASCADE;
-DROP TABLE IF EXISTS operacoes CASCADE;
-DROP TABLE IF EXISTS perfis CASCADE;
-DROP TABLE IF EXISTS usuarios CASCADE;
-DROP TABLE IF EXISTS camaras CASCADE;
+-- 0. LIMPEZA SEGURA (Cuidado: apaga dados!)
+DROP TABLE IF EXISTS votos, votacoes, itens_pauta, presencas, sessoes, configuracao_fases, templates_rito CASCADE;
+DROP TABLE IF EXISTS parlamentares, usuario_perfis, perfil_operacoes, operacoes, perfis, usuarios, camaras CASCADE;
 
--- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- 1. ESTRUTURA CORE & MULTI-TENANCY
@@ -31,10 +19,10 @@ CREATE TABLE camaras (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 2. SEGURANÇA & PERFIS (RBAC)
+-- 2. SEGURANÇA & PERFIS (RBAC PURO)
 CREATE TABLE perfis (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  nome TEXT NOT NULL, -- Ex: 'Presidente', 'Secretário'
+  nome TEXT NOT NULL,
   tipo_base TEXT NOT NULL CHECK (tipo_base IN ('PRESIDENTE', 'SECRETARIO', 'VEREADOR', 'ADMIN')),
   camara_id UUID REFERENCES camaras(id) ON DELETE CASCADE,
   created_at TIMESTAMPTZ DEFAULT now()
@@ -42,7 +30,7 @@ CREATE TABLE perfis (
 
 CREATE TABLE operacoes (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  codigo TEXT UNIQUE NOT NULL, -- Ex: 'SESSAO_ABRIR', 'VOTACAO_INICIAR'
+  codigo TEXT UNIQUE NOT NULL, 
   descricao TEXT
 );
 
@@ -60,6 +48,7 @@ CREATE TABLE usuarios (
   whatsapp TEXT,
   ativo BOOLEAN DEFAULT true,
   camara_id UUID REFERENCES camaras(id) ON DELETE SET NULL,
+  senha_alterada BOOLEAN DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -90,13 +79,13 @@ CREATE TABLE configuracao_fases (
   template_id UUID REFERENCES templates_rito(id) ON DELETE CASCADE,
   nome_fase TEXT NOT NULL,
   ordem INTEGER NOT NULL,
-  tempo_cronometro INTEGER DEFAULT 0, -- em segundos
+  tempo_cronometro INTEGER DEFAULT 0,
   permite_votacao BOOLEAN DEFAULT false,
   exige_quorum_minimo BOOLEAN DEFAULT true,
-  percentual_quorum FLOAT DEFAULT 0.33 -- 1/3, 0.5, 0.66
+  percentual_quorum FLOAT DEFAULT 0.33
 );
 
--- 5. EXECUÇÃO DA SESSÃO
+-- 5. EXECUÇÃO DA SESSÃO E DELIBERAÇÃO
 CREATE TABLE sessoes (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   camara_id UUID REFERENCES camaras(id) ON DELETE CASCADE,
@@ -115,7 +104,6 @@ CREATE TABLE presencas (
   manual BOOLEAN DEFAULT false
 );
 
--- 6. DELIBERAÇÃO & VOTAÇÃO
 CREATE TABLE itens_pauta (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   sessao_id UUID REFERENCES sessoes(id) ON DELETE CASCADE,
@@ -147,11 +135,27 @@ CREATE TABLE votos (
   UNIQUE(votacao_id, usuario_id)
 );
 
--- 7. REALTIME & RLS
-ALTER PUBLICATION supabase_realtime ADD TABLE 
-  sessoes, presencas, votacoes, votos, configuracao_fases, usuarios, parlamentares;
+-- ==========================================
+-- = 6. POLÍTICAS DE RLS CONSOLIDADAS FINAL =
+-- ==========================================
 
--- Habilitar RLS
+-- HELPER ANTI-RECURSÃO PARA RLS (SECURITY DEFINER)
+-- Retorna a camara_id embutida silenciosamente para checar multitenancy sem joins custosos
+CREATE OR REPLACE FUNCTION auth.minha_camara() RETURNS UUID AS $$
+  SELECT camara_id FROM public.usuarios WHERE id = auth.uid() LIMIT 1;
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+CREATE OR REPLACE FUNCTION auth.eu_sou_admin() RETURNS BOOLEAN AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.usuario_perfis up
+    JOIN public.perfis p ON up.perfil_id = p.id
+    JOIN public.perfil_operacoes po ON p.id = po.perfil_id
+    JOIN public.operacoes o ON po.operacao_id = o.id
+    WHERE up.usuario_id = auth.uid() AND o.codigo = 'SISTEMA_ADMINISTRAR_TENANTS'
+  );
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+-- ATIVANDO RLS EM TODAS AS TABELAS
 ALTER TABLE camaras ENABLE ROW LEVEL SECURITY;
 ALTER TABLE perfis ENABLE ROW LEVEL SECURITY;
 ALTER TABLE operacoes ENABLE ROW LEVEL SECURITY;
@@ -167,51 +171,51 @@ ALTER TABLE itens_pauta ENABLE ROW LEVEL SECURITY;
 ALTER TABLE votacoes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE votos ENABLE ROW LEVEL SECURITY;
 
--- Políticas de Acesso
-CREATE POLICY "Leitura pública para usuários autenticados" ON sessoes FOR SELECT USING (auth.role() = 'authenticated');
-CREATE POLICY "Leitura pública de itens de pauta" ON itens_pauta FOR SELECT USING (true);
-CREATE POLICY "Leitura pública de votações" ON votacoes FOR SELECT USING (true);
-CREATE POLICY "Leitura pública de câmaras" ON camaras FOR SELECT USING (true);
-CREATE POLICY "Usuários podem ver perfis da sua câmara" ON usuarios FOR SELECT USING (true);
+-- 6.1 CAMARAS
+CREATE POLICY "Admins globais vêem tudo, usuários vêem a sua" ON camaras
+FOR SELECT USING (auth.eu_sou_admin() OR id = auth.minha_camara());
+CREATE POLICY "Admins gerenciam camaras" ON camaras
+FOR ALL USING (auth.eu_sou_admin());
 
--- 8. SEED DATA (DADOS INICIAIS)
+-- 6.2 USUÁRIOS E PARLAMENTARES
+CREATE POLICY "Leitura de usuários dentro do tenant" ON usuarios
+FOR SELECT USING (auth.eu_sou_admin() OR camara_id = auth.minha_camara());
+CREATE POLICY "Gestão de usuários" ON usuarios
+FOR ALL USING (auth.eu_sou_admin() OR (camara_id = auth.minha_camara() AND auth.uid() IN (
+    SELECT usuario_id FROM public.usuario_perfis up JOIN public.perfil_operacoes po ON up.perfil_id = po.perfil_id 
+    JOIN public.operacoes o ON po.operacao_id = o.id WHERE o.codigo = 'GERENCIAR_USUARIOS_E_CAMARAS'
+)));
 
--- Inserir Operações
+CREATE POLICY "Leitura parlamentares tenant" ON parlamentares
+FOR SELECT USING (EXISTS (SELECT 1 FROM usuarios WHERE usuarios.id = parlamentares.id AND (usuarios.camara_id = auth.minha_camara() OR auth.eu_sou_admin())));
+CREATE POLICY "Gestão parlamentares" ON parlamentares
+FOR ALL USING (auth.eu_sou_admin() OR EXISTS (
+    SELECT 1 FROM usuarios WHERE usuarios.id = parlamentares.id AND usuarios.camara_id = auth.minha_camara() AND auth.uid() IN (
+      SELECT usuario_id FROM public.usuario_perfis up JOIN public.perfil_operacoes po ON up.perfil_id = po.perfil_id 
+      JOIN public.operacoes o ON po.operacao_id = o.id WHERE o.codigo = 'GERENCIAR_USUARIOS_E_CAMARAS'
+)));
+
+-- 6.3 VOTAÇÕES E VOTOS
+CREATE POLICY "Ver votos do tenant" ON votos
+FOR SELECT USING (true); -- Controle real feito na view/UI pois o Realtime precisa ler tudo
+CREATE POLICY "Inserir próprio voto" ON votos
+FOR INSERT WITH CHECK (usuario_id = auth.uid()); -- Proteção Rígida: Só pode inserir usando próprio UID
+
+-- 6.4 DEMAIS ENTIDADES DO LEGISLATIVO (Leitura liberada, restrição baseada em Sessão/UI)
+CREATE POLICY "Leitura irrestrita de sessoes para usuários logados" ON sessoes FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "Ações em sessoes" ON sessoes FOR ALL USING (auth.eu_sou_admin() OR camara_id = auth.minha_camara());
+
+-- Ativação GERAL do Realtime
+ALTER PUBLICATION supabase_realtime ADD TABLE usuarios, parlamentares, perfil_operacoes, usuario_perfis, camaras, sessoes, itens_pauta, votacoes, votos, presencas;
+
+-- 7. SEED DOS DADOS CORE DE GESTÃO (OPERAÇÕES DEFINITIVAS)
 INSERT INTO operacoes (codigo, descricao) VALUES
-('SESSAO_ABRIR', 'Abrir nova sessão plenária'),
-('SESSAO_AVANCAR', 'Avançar fase da sessão'),
-('VOTACAO_INICIAR', 'Iniciar votação de matéria'),
-('VOTACAO_ENCERRAR', 'Encerrar votação de matéria'),
-('VOTAR', 'Registrar voto em matéria'),
-('PRESENCA_REGISTRAR', 'Registrar presença na sessão');
-
--- Criar Câmara de Exemplo
-INSERT INTO camaras (id, nome, cidade, estado) VALUES
-('d290f1ee-6c54-4b01-90e6-d701748f0851', 'Câmara Municipal de Exemplo', 'Brasília', 'DF');
-
--- Criar Perfis Padrão para a Câmara de Exemplo (IDs HEX válidos)
-INSERT INTO perfis (id, nome, tipo_base, camara_id) VALUES
-('a1111111-1111-1111-1111-111111111111', 'Presidente', 'PRESIDENTE', 'd290f1ee-6c54-4b01-90e6-d701748f0851'),
-('b2222222-2222-2222-2222-222222222222', 'Secretário', 'SECRETARIO', 'd290f1ee-6c54-4b01-90e6-d701748f0851'),
-('c3333333-3333-3333-3333-333333333333', 'Vereador', 'VEREADOR', 'd290f1ee-6c54-4b01-90e6-d701748f0851');
-
--- Associar Operações aos Perfis
-INSERT INTO perfil_operacoes (perfil_id, operacao_id)
-SELECT 'a1111111-1111-1111-1111-111111111111', id FROM operacoes;
-
-INSERT INTO perfil_operacoes (perfil_id, operacao_id)
-SELECT 'b2222222-2222-2222-2222-222222222222', id FROM operacoes 
-WHERE codigo IN ('SESSAO_AVANCAR', 'VOTACAO_INICIAR', 'VOTACAO_ENCERRAR', 'PRESENCA_REGISTRAR');
-
-INSERT INTO perfil_operacoes (perfil_id, operacao_id)
-SELECT 'c3333333-3333-3333-3333-333333333333', id FROM operacoes 
-WHERE codigo IN ('VOTAR', 'PRESENCA_REGISTRAR');
-
--- Criar Template de Rito e Fases (Corrigido para 'e' em vez de 't')
-INSERT INTO templates_rito (id, camara_id, nome) VALUES
-('e1111111-1111-1111-1111-111111111111', 'd290f1ee-6c54-4b01-90e6-d701748f0851', 'Rito Ordinário Padrão');
-
-INSERT INTO configuracao_fases (template_id, nome_fase, ordem, tempo_cronometro, permite_votacao, exige_quorum_minimo, percentual_quorum) VALUES
-('e1111111-1111-1111-1111-111111111111', 'Pequeno Expediente', 0, 900, false, true, 0.33),
-('e1111111-1111-1111-1111-111111111111', 'Ordem do Dia', 1, 3600, true, true, 0.5),
-('e1111111-1111-1111-1111-111111111111', 'Explicações Pessoais', 2, 600, false, false, 0);
+    ('PAINEL_VISUALIZAR', 'Acesso básico de visualização à dashboard principal'),
+    ('SESSAO_GERENCIAR', 'Acesso ao Console Avançado da Presidência'),
+    ('SESSAO_ENCERRAR', 'Capacidade para derrubada de Sessão Ativa'),
+    ('SESSAO_AGENDAR', 'Agendar uma sessão na agenda institucional'),
+    ('VOTACAO_INICIAR', 'Iniciar votação de matéria'),
+    ('VOTAR', 'Registrar voto em matéria'),
+    ('GERENCIAR_USUARIOS_E_CAMARAS', 'Acesso completo à gestão de usuários'),
+    ('SISTEMA_CONFIGURAR', 'Acesso à infra de configurações e ritos'),
+    ('SISTEMA_ADMINISTRAR_TENANTS', 'Habilidade Cross-Câmara - SuperAdmin');

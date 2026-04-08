@@ -19,8 +19,9 @@ export const PainelVereadorPage = () => {
   const auth = useAuthContext();
   const sessaoCtx = useSessaoAtivaContext();
   const state = { ...auth, ...sessaoCtx };
-  const [hasVoted, setHasVoted] = useState(false);
-  const [lastVote, setLastVote] = useState<string | null>(null);
+  const meuVoto = state.votos?.find(v => v.usuario_id === state.usuarioAtual?.id);
+  const hasVoted = !!meuVoto;
+  const lastVote = meuVoto?.opcao || null;
 
   const handleVote = async (option: 'SIM' | 'NAO' | 'ABSTER') => {
     if (!state.usuarioAtual?.temPermissao('VOTAR')) {
@@ -28,8 +29,6 @@ export const PainelVereadorPage = () => {
       return;
     }
     await state.registrarVoto(option);
-    setHasVoted(true);
-    setLastVote(option);
   };
 
   const currentItem = state.itens?.[0];
